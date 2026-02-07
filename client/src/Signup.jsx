@@ -5,6 +5,43 @@ import { ChevronLeft, Edit2 } from "lucide-react";
 import { COMMON_STYLES, COLORS } from "./theme";
 import { API_BASE_URL } from "./config";
 
+// --- REUSED COMPONENT: FocusInput ---
+const FocusInput = ({ type, placeholder, value, onChange }) => {
+  const [isFocused, setIsFocused] = useState(false);
+
+  return (
+    <div style={{
+      // Gradient only on focus
+      background: isFocused ? 'linear-gradient(to right, #6366F1, #8b5cf6)' : '#333',
+      padding: '2px',
+      borderRadius: '10px',
+      marginTop: '16px',
+      transition: 'background 0.3s ease'
+    }}>
+      <input
+        type={type}
+        placeholder={placeholder}
+        value={value}
+        onChange={onChange}
+        onFocus={() => setIsFocused(true)}
+        onBlur={() => setIsFocused(false)}
+        style={{
+          width: '100%',
+          backgroundColor: '#1E1E1E',
+          color: 'white',
+          padding: '20px 16px',
+          borderRadius: '8px',
+          outline: 'none',
+          border: 'none',
+          fontSize: '20px',
+          boxSizing: 'border-box'
+        }}
+        required
+      />
+    </div>
+  );
+};
+
 export default function Signup() {
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
@@ -12,16 +49,16 @@ export default function Signup() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   
-  const [profileImage, setProfileImage] = useState(null); // Used for Preview
-  const [imageFile, setImageFile] = useState(null);       // Used for Upload <--- NEW STATE
+  const [profileImage, setProfileImage] = useState(null);
+  const [imageFile, setImageFile] = useState(null);
 
   const handleProfileImageChange = (e) => {
     const file = e.target.files?.[0];
     if (file) {
-      setImageFile(file); // Save the file object
+      setImageFile(file);
       const reader = new FileReader();
       reader.onloadend = () => {
-        setProfileImage(reader.result); // Save preview URL
+        setProfileImage(reader.result);
       };
       reader.readAsDataURL(file);
     }
@@ -29,24 +66,31 @@ export default function Signup() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Password Validation
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*(),.?":{}|<>]).{8,}$/;
+    
+    if (!passwordRegex.test(password)) {
+        alert("Password must be at least 8 characters long and include an uppercase letter, a lowercase letter, a number, and a special character.");
+        return;
+    }
+
     if (password !== confirmPassword) {
       alert("Passwords do not match!");
       return;
     }
 
     try {
-      // Create FormData object
       const formData = new FormData();
       formData.append("username", username);
       formData.append("email", email);
       formData.append("password", password);
       if (imageFile) {
-        formData.append("profileImage", imageFile); // Attach file
+        formData.append("profileImage", imageFile);
       }
 
       const response = await fetch(`${API_BASE_URL}/register`, {
         method: "POST",
-        // Do NOT set Content-Type header when using FormData; fetch sets it automatically
         body: formData,
       });
 
@@ -63,10 +107,10 @@ export default function Signup() {
       alert("Failed to connect to server.");
     }
   };
+
   return (
     <div style={{...COMMON_STYLES.container, justifyContent: 'flex-start'}}>
       
-      {/* Back Button */}
       <button 
         onClick={() => navigate(-1)} 
         style={{...COMMON_STYLES.backBtn, color: 'white', marginBottom: '32px'}}
@@ -87,9 +131,9 @@ export default function Signup() {
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             
-            {/* Profile Picture Logic */}
+            {/* Profile Picture Upload */}
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '8px' }}>
               <div style={{ position: 'relative' }}>
                 <div style={{
@@ -106,7 +150,6 @@ export default function Signup() {
                   )}
                 </div>
                 
-                {/* File Input Label */}
                 <label
                   htmlFor="profile-image"
                   style={{
@@ -126,10 +169,34 @@ export default function Signup() {
               </div>
             </div>
 
-            <input type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} style={COMMON_STYLES.input} required />
-            <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} style={COMMON_STYLES.input} required />
-            <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} style={COMMON_STYLES.input} required />
-            <input type="password" placeholder="Confirm Password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} style={COMMON_STYLES.input} required />
+            {/* Inputs with Focus Effect */}
+            <FocusInput 
+                type="text" 
+                placeholder="Username" 
+                value={username} 
+                onChange={e => setUsername(e.target.value)} 
+            />
+            
+            <FocusInput 
+                type="email" 
+                placeholder="Email" 
+                value={email} 
+                onChange={e => setEmail(e.target.value)} 
+            />
+            
+            <FocusInput 
+                type="password" 
+                placeholder="Password" 
+                value={password} 
+                onChange={e => setPassword(e.target.value)} 
+            />
+            
+            <FocusInput 
+                type="password" 
+                placeholder="Confirm Password" 
+                value={confirmPassword} 
+                onChange={e => setConfirmPassword(e.target.value)} 
+            />
 
             <button type="submit" style={COMMON_STYLES.buttonPrimary}>
               Submit

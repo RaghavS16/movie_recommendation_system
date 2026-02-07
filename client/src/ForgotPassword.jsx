@@ -3,7 +3,43 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { COMMON_STYLES, COLORS } from "./theme";
-import { API_BASE_URL } from "./config"; // <--- IMPORT CONFIG
+import { API_BASE_URL } from "./config";
+
+// --- REUSED COMPONENT: FocusInput ---
+const FocusInput = ({ type, placeholder, value, onChange }) => {
+  const [isFocused, setIsFocused] = useState(false);
+
+  return (
+    <div style={{
+      background: isFocused ? 'linear-gradient(to right, #6366F1, #8b5cf6)' : '#333',
+      padding: '2px',
+      borderRadius: '10px',
+      marginTop: '16px',
+      transition: 'background 0.3s ease'
+    }}>
+      <input
+        type={type}
+        placeholder={placeholder}
+        value={value}
+        onChange={onChange}
+        onFocus={() => setIsFocused(true)}
+        onBlur={() => setIsFocused(false)}
+        style={{
+          width: '100%',
+          backgroundColor: '#1E1E1E',
+          color: 'white',
+          padding: '20px 16px',
+          borderRadius: '8px',
+          outline: 'none',
+          border: 'none',
+          fontSize: '20px',
+          boxSizing: 'border-box'
+        }}
+        required
+      />
+    </div>
+  );
+};
 
 export default function ForgotPassword() {
   const navigate = useNavigate();
@@ -12,28 +48,40 @@ export default function ForgotPassword() {
   const [otp, setOtp] = useState(new Array(6).fill("")); 
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [loading, setLoading] = useState(false); // <--- Add Loading State
+  const [loading, setLoading] = useState(false);
+  
+  // Track which OTP box is focused
+  const [focusedOtpIndex, setFocusedOtpIndex] = useState(-1);
 
-  // ... (Keep handleOtpChange and handleOtpKeyDown exactly as they are) ...
+  // --- UPDATED OTP HANDLERS (To handle DOM traversal with wrappers) ---
   const handleOtpChange = (element, index) => {
     if (isNaN(element.value)) return false;
     const newOtp = [...otp];
     newOtp[index] = element.value;
     setOtp(newOtp);
-    if (element.value && element.nextSibling) {
-      element.nextSibling.focus();
+    
+    // Find next input: Go up to wrapper, next sibling wrapper, then find input
+    if (element.value) {
+        const nextWrapper = element.parentElement.nextElementSibling;
+        if (nextWrapper) {
+            const nextInput = nextWrapper.querySelector('input');
+            if (nextInput) nextInput.focus();
+        }
     }
   };
 
   const handleOtpKeyDown = (e, index) => {
     if (e.key === "Backspace") {
-      if (!otp[index] && e.target.previousSibling) {
-        e.target.previousSibling.focus();
+      if (!otp[index]) {
+         const prevWrapper = e.target.parentElement.previousElementSibling;
+         if (prevWrapper) {
+             const prevInput = prevWrapper.querySelector('input');
+             if (prevInput) prevInput.focus();
+         }
       }
     }
   };
 
-  // --- UPDATED: STEP 1 (Request OTP) ---
   const handleSendCode = async (e) => {
     e.preventDefault();
     if (!email) return;
@@ -61,7 +109,6 @@ export default function ForgotPassword() {
     }
   };
 
-  // --- UPDATED: STEP 2 (Reset Password) ---
   const handleResetPassword = async (e) => {
     e.preventDefault();
     const otpString = otp.join("");
@@ -128,11 +175,15 @@ export default function ForgotPassword() {
 
           {step === 1 && (
             <form onSubmit={handleSendCode} style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-              <input
-                type="email" placeholder="Enter your email address"
-                value={email} onChange={(e) => setEmail(e.target.value)}
-                style={COMMON_STYLES.input} required
+              
+              {/* Focus Input for Email */}
+              <FocusInput 
+                type="email" 
+                placeholder="Enter your email address"
+                value={email} 
+                onChange={(e) => setEmail(e.target.value)} 
               />
+              
               <button type="submit" disabled={loading} style={{...COMMON_STYLES.buttonPrimary, opacity: loading ? 0.7 : 1}}>
                 {loading ? "Sending..." : "Send Code"}
               </button>
@@ -142,34 +193,62 @@ export default function ForgotPassword() {
           {step === 2 && (
             <form onSubmit={handleResetPassword} style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
               
-              {/* OTP Inputs */}
+              {/* OTP Inputs with Gradient Wrappers */}
               <div style={{ display: 'flex', gap: '5px', justifyContent: 'space-between' }}>
                 {otp.map((data, index) => (
-                    <input
-                      key={index}
-                      type="text" maxLength="1" value={data}
-                      onChange={(e) => handleOtpChange(e.target, index)}
-                      onKeyDown={(e) => handleOtpKeyDown(e, index)}
-                      onFocus={(e) => e.target.select()}
-                      style={{
-                        ...COMMON_STYLES.input,
-                        width: '60px', height: '60px', textAlign: 'center',
-                        fontSize: '25px', fontWeight: 'bold', padding: '0', marginTop: '0'
-                      }}
-                    />
+                    <div 
+                        key={index}
+                        style={{
+                            // Dynamic Gradient Border
+                            background: focusedOtpIndex === index ? 'linear-gradient(to right, #6366F1, #8b5cf6)' : '#333',
+                            padding: '2px',
+                            borderRadius: '10px',
+                            width: '60px', 
+                            height: '60px',
+                            transition: 'background 0.3s ease'
+                        }}
+                    >
+                        <input
+                          type="text" 
+                          maxLength="1" 
+                          value={data}
+                          onChange={(e) => handleOtpChange(e.target, index)}
+                          onKeyDown={(e) => handleOtpKeyDown(e, index)}
+                          
+                          // Track focus state
+                          onFocus={(e) => {
+                              e.target.select();
+                              setFocusedOtpIndex(index);
+                          }}
+                          onBlur={() => setFocusedOtpIndex(-1)}
+                          
+                          style={{
+                            ...COMMON_STYLES.input,
+                            width: '100%', height: '100%', 
+                            textAlign: 'center', fontSize: '25px', fontWeight: 'bold', 
+                            padding: '0', marginTop: '0',
+                            backgroundColor: '#1E1E1E',
+                            borderRadius: '8px', // Match inner radius
+                            border: 'none', outline: 'none'
+                          }}
+                        />
+                    </div>
                 ))}
               </div>
 
-              <input
-                type="password" placeholder="New Password"
-                value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
-                style={COMMON_STYLES.input} required
+              {/* Focus Inputs for Passwords */}
+              <FocusInput 
+                type="password" 
+                placeholder="New Password" 
+                value={newPassword} 
+                onChange={(e) => setNewPassword(e.target.value)} 
               />
 
-              <input
-                type="password" placeholder="Confirm New Password"
-                value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
-                style={COMMON_STYLES.input} required
+              <FocusInput 
+                type="password" 
+                placeholder="Confirm New Password" 
+                value={confirmPassword} 
+                onChange={(e) => setConfirmPassword(e.target.value)} 
               />
 
               <button type="submit" disabled={loading} style={{...COMMON_STYLES.buttonPrimary, opacity: loading ? 0.7 : 1}}>

@@ -1,8 +1,50 @@
+// src/Login.jsx
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { COMMON_STYLES, COLORS } from "./theme";
 import { API_BASE_URL } from "./config";
+
+// --- NEW COMPONENT: FocusInput ---
+// This handles the "Gradient only on Focus" logic
+const FocusInput = ({ type, placeholder, value, onChange }) => {
+  const [isFocused, setIsFocused] = useState(false);
+
+  return (
+    <div style={{
+      // If focused: Gradient. If not: Dark Grey Border (#333)
+      background: isFocused ? 'linear-gradient(to right, #6366F1, #8b5cf6)' : '#333',
+      padding: '2px', // Border width
+      borderRadius: '10px',
+      marginTop: '16px',
+      transition: 'background 0.3s ease' // Smooth transition effect
+    }}>
+      <input
+        type={type}
+        placeholder={placeholder}
+        value={value}
+        onChange={onChange}
+        
+        // --- TOGGLE STATE HERE ---
+        onFocus={() => setIsFocused(true)}
+        onBlur={() => setIsFocused(false)}
+        
+        style={{
+          width: '100%',
+          backgroundColor: '#1E1E1E', // Inner dark background
+          color: 'white',
+          padding: '20px 16px',
+          borderRadius: '8px', // Slightly smaller than wrapper to fit inside
+          outline: 'none',
+          border: 'none',
+          fontSize: '20px',
+          boxSizing: 'border-box'
+        }}
+        required
+      />
+    </div>
+  );
+};
 
 export default function Login() {
   const navigate = useNavigate();
@@ -12,6 +54,12 @@ export default function Login() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
+    // Simple Validation
+    if (!email || !password) {
+        alert("Please fill in all fields");
+        return;
+    }
+
     try {
       const response = await fetch(`${API_BASE_URL}/login`, {
         method: "POST",
@@ -22,21 +70,18 @@ export default function Login() {
       const data = await response.json();
 
       if (response.ok) {
-  localStorage.setItem("token", data.access_token);
-  localStorage.setItem("username", data.username);
-  localStorage.setItem("email", data.email);
-  
-  // Save the image URL
-  if (data.profile_image) {
-    localStorage.setItem("profileImage", data.profile_image);
-  } else {
-    localStorage.removeItem("profileImage");
-  }
-  
-  navigate("/chat");
-  window.location.reload(); 
-}
-      else {
+        localStorage.setItem("token", data.access_token);
+        localStorage.setItem("username", data.username);
+        localStorage.setItem("email", data.email);
+        
+        if (data.profile_image) {
+            localStorage.setItem("profileImage", data.profile_image);
+        } else {
+            localStorage.removeItem("profileImage");
+        }
+        
+        window.location.href = "/chat";
+      } else {
         alert(data.message || "Login failed");
       }
     } catch (error) {
@@ -48,20 +93,17 @@ export default function Login() {
   return (
     <div style={{...COMMON_STYLES.container, justifyContent: 'flex-start'}}>
       
-      {/* Back Button */}
       <button 
         onClick={() => navigate(-1)} 
         style={{...COMMON_STYLES.backBtn, color: 'white', marginBottom: '32px'}}
         aria-label="Go back"
       >
-        <ChevronLeft size={24} />
+        <ChevronLeft size={30} />
       </button>
 
-      {/* Form Container */}
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
         <div style={COMMON_STYLES.wrapper}>
           
-          {/* Heading */}
           <div style={{ marginBottom: '32px' }}>
             <h1 style={{ fontSize: '35px', fontWeight: 'bold', color: 'white', marginBottom: '12px' }}>
               Hello there!
@@ -71,22 +113,24 @@ export default function Login() {
             </p>
           </div>
 
-          {/* Form */}
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-            <input
-              type="email" placeholder="Email"
-              value={email} onChange={(e) => setEmail(e.target.value)}
-              style={COMMON_STYLES.input} required
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            
+            {/* New Focus Inputs */}
+            <FocusInput 
+                type="email" 
+                placeholder="Email" 
+                value={email} 
+                onChange={(e) => setEmail(e.target.value)} 
             />
             
-            <input
-              type="password" placeholder="Password"
-              value={password} onChange={(e) => setPassword(e.target.value)}
-              style={COMMON_STYLES.input} required
+            <FocusInput 
+                type="password" 
+                placeholder="Password" 
+                value={password} 
+                onChange={(e) => setPassword(e.target.value)} 
             />
 
-            {/* Forgot Password Link */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
               <span 
                 onClick={() => navigate('/forgot-password')}
                 style={{ 

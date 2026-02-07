@@ -119,12 +119,35 @@ def login():
         }), 200
     return jsonify({"message": "Invalid credentials"}), 401
 
-# server/app.py
 
-# server/app.py (Replace only the chat function)
+# In server/app.py
 
-# server/app.py (Replace ONLY the chat function)
+# --- NEW HELPER FOR HUMAN-LIKE REPLIES ---
+def get_persona_response(mood, lang_name, count):
+    """Generates a friendly, empathetic response based on mood."""
+    
+    # 1. Empathetic Intros
+    intros = {
+        "happy": ["That's awesome! Let's keep the good vibes rolling. 😎", "Glad to hear that! Here are some movies to match your energy."],
+        "sad": ["I'm sorry you're feeling down. 🌧️ Sometimes a good movie helps let it all out.", "Sending you a virtual hug. 🫂 Here are some touching movies for you."],
+        "excited": ["Love the energy! 🚀 Let's get your adrenaline pumping with these picks.", "Let's go! Here are some high-octane movies for you."],
+        "scared": ["Ooh, brave choice! 👻 Don't watch these alone...", "Turning off the lights? Here are some spooky picks."],
+        "relaxing": ["It sounds like you've had a long day. 😴 Let's help you unwind.", "Time to kick back and chill. 🍵 Here are some feel-good movies."],
+        "funny": ["Ready to laugh? 😂 I've picked some hilarious ones for you.", "Laughter is the best medicine! Check these out."],
+        "romantic": ["Love is in the air! ❤️ Here are some romantic picks.", "Aww, perfect for a date night (or a self-love night!)."],
+        "thrilling": ["On the edge of your seat? 🕵️‍♀️ Let's solve some mysteries.", "Get ready for some twists and turns!"],
+        "bored": ["Let's cure that boredom with something totally different. 🎲", "I've got just the thing to spark your interest."]
+    }
 
+    # Select Intro
+    intro = random.choice(intros.get(mood, ["Here are some great movies for you."]))
+    
+    # Add Language Context
+    lang_str = f" in {lang_name}" if lang_name else ""
+    
+    return f"{intro} Here are {count} highly-rated movies{lang_str}:"
+
+# --- UPDATED CHAT ROUTE ---
 @app.route('/chat', methods=['POST'])
 @jwt_required()
 def chat():
@@ -134,131 +157,125 @@ def chat():
     data = request.get_json()
     user_input = data.get('message', '').strip()
     
-    # 0. GREETING CHECK
-    greetings = ["hi", "hello", "hey", "hola", "greetings", "sup", "what's up"]
+    # 0. GREETING CHECK (Add small talk)
+    greetings = ["hi", "hello", "hey", "hola", "greetings", "sup", "what's up", "how are you"]
     if user_input.lower() in greetings:
         return jsonify({
-            "bot_response": "Hello! I'm FilmoBot. 🎬\n\nTell me how you're feeling (e.g., 'I am tired'), or ask for a specific genre (e.g., 'Tamil Action movies').",
+            "bot_response": "Hello there! 👋 I'm FilmoBot.\n\nI can help you find the perfect movie based on how you feel.\n\nTry saying: **'I am tired'** or **'I want a Tamil Action movie'**.",
             "movies": []
         })
 
     results = []
     bot_response = ""
 
-    # 1. ANALYZE INPUT
-    new_mood = detect_mood(user_input)
-    new_code, new_lang_name = detect_language(user_input)
-    count = detect_count(user_input)
+    try:
+        # 1. ANALYZE INPUT (Now with Fuzzy Matching for Typos)
+        new_mood = detect_mood(user_input)
+        new_code, new_lang_name = detect_language(user_input)
+        count = detect_count(user_input)
 
-    # 2. DETECT INTENT (Discovery vs. Search)
-    # If the user gives a NEW mood/lang OR uses trigger words, they want Discovery.
-    # Otherwise, they are likely searching for a specific title (e.g., "Kaithi").
-    trigger_words = ["suggest", "recommend", "show me", "find", "more", "another", "top rated", "best"]
-    is_discovery_intent = False
-    
-    if new_mood or new_code:
-        is_discovery_intent = True
-    elif any(word in user_input.lower() for word in trigger_words):
-        is_discovery_intent = True
-
-    # 3. UPDATE CONTEXT (MEMORY)
-    if new_mood: 
-        user.last_mood = new_mood
-        print(f"🧠 MEMORY: Mood updated to {new_mood}")
+        # 2. DETECT INTENT
+        trigger_words = ["suggest", "recommend", "show me", "find", "more", "another", "top rated", "best", "movie"]
+        is_discovery_intent = False
         
-    if new_code: 
-        user.last_language = new_code
-        print(f"🧠 MEMORY: Language updated to {new_code}")
-    
-    if "reset" in user_input.lower() or "clear" in user_input.lower():
-        user.last_mood = None
-        user.last_language = None
+        if new_mood or new_code:
+            is_discovery_intent = True
+        elif any(word in user_input.lower() for word in trigger_words):
+            is_discovery_intent = True
+
+        # 3. MEMORY UPDATE
+        if new_mood: user.last_mood = new_mood
+        if new_code: user.last_language = new_code
+        
+        if "reset" in user_input.lower() or "clear" in user_input.lower():
+            user.last_mood = None
+            user.last_language = None
+            db.session.commit()
+            return jsonify({"bot_response": "Memory wiped! 🧹 What are you in the mood for now?", "movies": []})
+
         db.session.commit()
-        return jsonify({"bot_response": "I've reset my memory. What are you in the mood for now?", "movies": []})
 
-    db.session.commit()
+        # 4. EXECUTE SEARCH OR DISCOVERY
+        final_mood = user.last_mood
+        final_lang = user.last_language
 
-    # 4. DECISION LOGIC
-    final_mood = user.last_mood
-    final_lang = user.last_language
-    
-    # Case A: User wants Discovery (e.g. "Suggest funny movies", "More", "Tamil")
-    if is_discovery_intent and (final_mood or final_lang):
-        print(f"🔍 DISCOVERY MODE: Mood={final_mood}, Lang={final_lang}")
-        results = discover_movies(mood=final_mood, language_code=final_lang)
-        
-        mood_str = final_mood if final_mood else "good"
-        lang_str = f" in {new_lang_name}" if new_lang_name else (" in your preferred language" if final_lang else "")
-        
-        if new_mood and not new_code:
-            bot_response = f"I found some highly-rated {mood_str} movies for you:"
-        elif new_code and not new_mood:
-            bot_response = f"Here are {mood_str} movies in {new_lang_name}, keeping your previous mood in mind:"
-        else:
-            bot_response = f"Here are {count} {mood_str} movies{lang_str} with the highest ratings:"
-            
-    # Case B: User Typed a Specific Name (e.g., "Kaithi") -> DIRECT SEARCH
-    else:
-        print(f"🔎 SEARCH MODE: Looking for title '{user_input}'")
-        results = search_movie(user_input)
-        bot_response = f"Here are the top results for '{user_input}':"
-        
-        # Fallback: If title search fails, BUT we have memory, offer suggestions.
-        if not results and (final_mood or final_lang):
-            bot_response = f"I couldn't find a movie named '{user_input}'. But based on your preferences, here are some recommendations:"
+        if is_discovery_intent and (final_mood or final_lang):
+            print(f"🔍 DISCOVERY: Mood={final_mood}, Lang={final_lang}")
             results = discover_movies(mood=final_mood, language_code=final_lang)
+            
+            # Use the new Persona Generator
+            bot_response = get_persona_response(final_mood, new_lang_name or "your preferred language", count)
+            
+        else:
+            print(f"🔎 DIRECT SEARCH: '{user_input}'")
+            results = search_movie(user_input)
+            bot_response = f"Here are the top results for '{user_input}':"
+            
+            if not results and (final_mood or final_lang):
+                bot_response = f"I couldn't find a movie named '{user_input}'. 🤔 But since you like {final_mood or 'good'} movies, try these:"
+                results = discover_movies(mood=final_mood, language_code=final_lang)
 
-    if not results:
-        return jsonify({
-            "bot_response": "I couldn't find anything matching that. Try 'Funny movies' or 'Tamil action'.", 
-            "movies": []
-        })
-    
-    # 5. FETCH DETAILS & SORT BY RATING
-    candidate_movies = []
-    
-    # Process top 20 candidates
-    limit = 20 if is_discovery_intent else 5 # Search results need fewer candidates
-    
-    for movie in results[:limit]:
-        title = movie.get('title')
-        release_date = movie.get('release_date', '')
-        year = release_date[:4] if release_date else ''
+        # 5. HANDLE EMPTY RESULTS
+        if not results:
+            return jsonify({
+                "bot_response": "I searched everywhere, but I couldn't find any movies matching that. 🧐\n\nTry checking the spelling or ask for a different genre (e.g., 'Funny movies').", 
+                "movies": []
+            })
         
-        details = get_extended_details(title, year)
+        # 6. FETCH DETAILS & SORT
+        candidate_movies = []
+        limit = 20 if is_discovery_intent else 5
         
-        candidate_movies.append({
-            "id": movie.get('id'),
-            "title": title,
-            "overview": movie.get('overview'),
-            "poster_path": movie.get('poster_path'),
-            "tmdb_rating": movie.get('vote_average'),
-            "imdb_rating": details['imdb_rating'],
-            "cast": details['cast'],
-            "director": details['director'],
-            "duration": details['duration'],
-        })
+        for movie in results[:limit]:
+            title = movie.get('title')
+            year = movie.get('release_date', '')[:4]
+            details = get_extended_details(title, year)
+            
+            candidate_movies.append({
+                "id": movie.get('id'),
+                "title": title,
+                "overview": movie.get('overview'),
+                "poster_path": movie.get('poster_path'),
+                "tmdb_rating": movie.get('vote_average'),
+                "imdb_rating": details['imdb_rating'],
+                "cast": details['cast'],
+                "director": details['director'],
+                "duration": details['duration'],
+            })
 
-    # 6. SORTING FUNCTION (Highest Rated First)
-    def get_rating_score(m):
-        imdb = m.get('imdb_rating', 'N/A')
-        if imdb and imdb != 'N/A':
-            try: return float(imdb)
-            except: pass
-        tmdb = m.get('tmdb_rating', 0)
-        try: return float(tmdb)
-        except: return 0
+        # Sort by IMDb -> TMDb
+        def get_rating_score(m):
+            imdb = m.get('imdb_rating', 'N/A')
+            if imdb and imdb != 'N/A':
+                try: return float(imdb)
+                except: pass
+            tmdb = m.get('tmdb_rating', 0)
+            try: return float(tmdb)
+            except: return 0
 
-    candidate_movies.sort(key=get_rating_score, reverse=True)
-    
-    # 7. SELECT FINAL & GET STREAMING
-    final_movies = []
-    for movie in candidate_movies[:count]:
-        movie['where_to_watch'] = get_watch_providers(movie['id'], movie['title'])
-        final_movies.append(movie)
+        candidate_movies.sort(key=get_rating_score, reverse=True)
+        
+        final_movies = []
+        for movie in candidate_movies[:count]:
+            movie['where_to_watch'] = get_watch_providers(movie['id'], movie['title'])
+            final_movies.append(movie)
 
-    return jsonify({"bot_response": bot_response, "movies": final_movies})
+        return jsonify({"bot_response": bot_response, "movies": final_movies})
 
+    # --- ERROR HANDLING LIKE A PRO ---
+    except Exception as e:
+        print(f"❌ SERVER ERROR: {e}")
+        # Check if it's a network issue message
+        if "Network Error" in str(e) or "Failed to connect" in str(e):
+            return jsonify({
+                "bot_response": "I'm having trouble connecting to the movie database right now. 🔌\n\nPlease check your **internet connection** and try again.",
+                "movies": []
+            })
+        else:
+            return jsonify({
+                "bot_response": "Oops! Something went wrong on my end. 😵‍💫 Please try again in a moment.",
+                "movies": []
+            })
 
 @app.route('/add-watchlist', methods=['POST'])
 @jwt_required()
