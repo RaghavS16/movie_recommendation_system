@@ -12,12 +12,12 @@ from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 
-# Import updated functions
+# server/app.py
 from tmdb_client import (
     search_movie, discover_movies, get_extended_details, 
-    detect_mood, detect_language, get_watch_providers, detect_count
+    detect_mood, detect_language, get_watch_providers, detect_count,
+    get_trailer_key  # <--- ADD THIS
 )
-
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
 
 app = Flask(__name__)
@@ -70,6 +70,7 @@ class Watchlist(db.Model):
     duration = db.Column(db.String(50))
     cast = db.Column(db.String(500))
     where_to_watch = db.Column(db.String(500))
+    trailer_key = db.Column(db.String(50))
     added_on = db.Column(db.DateTime, default=datetime.utcnow)
 
 # --- ROUTES ---
@@ -258,6 +259,7 @@ def chat():
         final_movies = []
         for movie in candidate_movies[:count]:
             movie['where_to_watch'] = get_watch_providers(movie['id'], movie['title'])
+            movie['trailer_key'] = get_trailer_key(movie['id'])
             final_movies.append(movie)
 
         return jsonify({"bot_response": bot_response, "movies": final_movies})
@@ -282,22 +284,33 @@ def chat():
 def add_watchlist():
     current_user_id = get_jwt_identity()
     data = request.get_json()
+    
     if not data.get('movie_id') or not data.get('title'):
         return jsonify({"message": "Missing movie data"}), 400
+        
     existing_entry = Watchlist.query.filter_by(user_id=int(current_user_id), movie_id=str(data['movie_id'])).first()
     if existing_entry:
         return jsonify({"message": "Movie already in watchlist"}), 409
+        
     new_entry = Watchlist(
-        user_id=int(current_user_id), movie_id=str(data['movie_id']), title=data['title'],
-        poster_url=data.get('poster_path'), overview=data.get('overview', 'No overview available'),
-        imdb_rating=data.get('imdb_rating', 'N/A'), director=data.get('director', 'N/A'),
-        duration=data.get('duration', 'N/A'), cast=data.get('cast', 'N/A'),
-        where_to_watch=data.get('where_to_watch', 'N/A')
+        user_id=int(current_user_id), 
+        movie_id=str(data['movie_id']), 
+        title=data['title'],
+        poster_url=data.get('poster_path'), 
+        overview=data.get('overview', 'No overview available'),
+        imdb_rating=data.get('imdb_rating', 'N/A'), 
+        director=data.get('director', 'N/A'),
+        duration=data.get('duration', 'N/A'), 
+        cast=data.get('cast', 'N/A'),
+        where_to_watch=data.get('where_to_watch', 'N/A'),
+        trailer_key=data.get('trailer_key', None) 
     )
+    
     db.session.add(new_entry)
     db.session.commit()
     return jsonify({"message": "Movie added to watchlist!"}), 201
 
+# 3. Update '/watchlist' to SEND the key back to frontend
 @app.route('/watchlist', methods=['GET'])
 @jwt_required()
 def get_watchlist():
@@ -306,10 +319,17 @@ def get_watchlist():
     output = []
     for movie in saved_movies:
         output.append({
-            "id": movie.id, "movie_id": movie.movie_id, "title": movie.title,
-            "poster_path": movie.poster_url, "overview": movie.overview,
-            "imdb_rating": movie.imdb_rating, "director": movie.director,
-            "duration": movie.duration, "cast": movie.cast, "where_to_watch": movie.where_to_watch
+            "id": movie.id, 
+            "movie_id": movie.movie_id, 
+            "title": movie.title,
+            "poster_path": movie.poster_url, 
+            "overview": movie.overview,
+            "imdb_rating": movie.imdb_rating, 
+            "director": movie.director,
+            "duration": movie.duration, 
+            "cast": movie.cast, 
+            "where_to_watch": movie.where_to_watch,
+            "trailer_key": movie.trailer_key 
         })
     return jsonify(output), 200
 

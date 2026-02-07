@@ -146,6 +146,34 @@ def search_movie(query):
     except: 
         return []
 
+# server/tmdb_client.py
+
+def get_trailer_key(movie_id):
+    """
+    Fetches the YouTube Video Key for a given movie ID.
+    Returns the key string (e.g., 'd9MyW72ELq0') or None.
+    """
+    try:
+        url = f"{TMDB_BASE_URL}/movie/{movie_id}/videos"
+        params = {"api_key": TMDB_API_KEY}
+        response = requests.get(url, params=params, timeout=5)
+        data = response.json()
+        
+        results = data.get("results", [])
+        
+        # Priority 1: "Trailer" on YouTube
+        for video in results:
+            if video.get("site") == "YouTube" and video.get("type") == "Trailer":
+                return video.get("key")
+        
+        # Priority 2: Any YouTube video (Teaser, Clip) if no Trailer found
+        if results and results[0].get("site") == "YouTube":
+             return results[0].get("key")
+
+        return None
+    except:
+        return None
+    
 def discover_movies(mood=None, language_code=None):
     url = f"{TMDB_BASE_URL}/discover/movie"
     params = {

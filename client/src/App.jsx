@@ -82,13 +82,13 @@ export default function App() {
             movie_id: movie.id || "unknown",
             title: movie.title,
             poster_path: movie.poster_path,
-            // --- ALL CONTEXT FIELDS ---
             overview: movie.overview,
             imdb_rating: movie.imdb_rating,
             director: movie.director,
             duration: movie.duration,
-            cast: movie.cast,                     // <--- SENDING CAST
-            where_to_watch: movie.where_to_watch  // <--- SENDING WATCH INFO
+            cast: movie.cast,                    
+            where_to_watch: movie.where_to_watch,
+            trailer_key: movie.trailer_key 
         };
         
         const res = await fetch(`${API_BASE_URL}/add-watchlist`, {

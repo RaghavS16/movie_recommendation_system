@@ -1,11 +1,14 @@
 // src/MovieCard.jsx
 import React, { useState } from 'react';
-import { Star, Clock, MonitorPlay, Heart, X } from 'lucide-react';
+import { Star, Clock, MonitorPlay, Heart, X, Youtube, PlayCircle } from 'lucide-react'; // Added Icons
 import { COLORS } from './theme';
 
 const MovieCard = ({ data, isLiked, onToggle }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showFullPoster, setShowFullPoster] = useState(false);
+  
+  // NEW: State for Trailer Modal
+  const [showTrailer, setShowTrailer] = useState(false);
 
   // 1. Image Logic
   let imageUrl = "https://via.placeholder.com/500x750?text=No+Poster";
@@ -15,13 +18,11 @@ const MovieCard = ({ data, isLiked, onToggle }) => {
       : data.poster_path;
   }
   
-  // High-Quality Image for Modal
   let fullSizeUrl = imageUrl;
   if (data.poster_path && data.poster_path.startsWith('/')) {
       fullSizeUrl = `https://image.tmdb.org/t/p/original${data.poster_path}`;
   }
 
-  // 2. Text Logic
   const overviewText = data.overview || "No overview available.";
   const isLongText = overviewText.length > 150; 
 
@@ -50,10 +51,7 @@ const MovieCard = ({ data, isLiked, onToggle }) => {
             onMouseEnter={(e) => e.target.style.opacity = '1'}
             onMouseLeave={(e) => e.target.style.opacity = '0.8'}
           />
-          <div style={{ 
-            position: 'absolute', bottom: 0, left: 0, right: 0, 
-            height: '50%', background: 'linear-gradient(to top, #1E1E1E, transparent)', pointerEvents: 'none'
-          }} />
+          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '50%', background: 'linear-gradient(to top, #1E1E1E, transparent)', pointerEvents: 'none' }} />
 
           {/* Heart Button */}
           <button 
@@ -89,16 +87,12 @@ const MovieCard = ({ data, isLiked, onToggle }) => {
             </span>
           </div>
 
-          <div 
-            onClick={() => isLongText && setIsExpanded(!isExpanded)} 
-            style={{ cursor: isLongText ? 'pointer' : 'default', marginBottom: '20px' }}
-          >
+          <div onClick={() => isLongText && setIsExpanded(!isExpanded)} style={{ cursor: isLongText ? 'pointer' : 'default', marginBottom: '20px' }}>
             <p style={{ 
               color: '#ccc', fontSize: '15px', lineHeight: '1.6', margin: '0',
               display: (isExpanded || !isLongText) ? 'block' : '-webkit-box', 
               WebkitLineClamp: (isExpanded || !isLongText) ? 'unset' : '3', 
-              WebkitBoxOrient: 'vertical', 
-              overflow: 'hidden' 
+              WebkitBoxOrient: 'vertical', overflow: 'hidden' 
             }}>
               {overviewText}
             </p>
@@ -110,30 +104,44 @@ const MovieCard = ({ data, isLiked, onToggle }) => {
           </div>
 
           <div style={{ paddingTop: '16px', borderTop: '1px solid #333' }}>
-              <div style={{ marginBottom: '10px' }}>
-                  <span style={{ color: COLORS.textSub, fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Starring</span>
-                  <div style={{ color: 'white', fontSize: '14px', marginTop: '4px' }}>
-                      {data.cast || "Cast unavailable"}
-                  </div>
+              
+              {/* --- NEW: TRAILER BUTTON --- */}
+              <div style={{ marginBottom: '16px' }}>
+                {data.trailer_key ? (
+                   <button 
+                     onClick={() => setShowTrailer(true)}
+                     style={{
+                        width: '100%',
+                        backgroundColor: '#FF0000', color: 'white', border: 'none',
+                        padding: '10px', borderRadius: '8px', cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                        fontSize: '15px', fontWeight: 'bold', transition: 'background 0.2s'
+                     }}
+                     onMouseEnter={(e) => e.target.style.backgroundColor = '#cc0000'}
+                     onMouseLeave={(e) => e.target.style.backgroundColor = '#FF0000'}
+                   >
+                     <PlayCircle size={20} fill="white" color="#FF0000" /> 
+                     Watch Trailer
+                   </button>
+                ) : (
+                   <button disabled style={{ 
+                      width: '100%', backgroundColor: '#333', color: '#666', 
+                      border: 'none', padding: '10px', borderRadius: '8px', 
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+                   }}>
+                      <X size={18} /> Trailer Unavailable
+                   </button>
+                )}
               </div>
 
-              {/* --- WHERE TO WATCH SECTION (UPDATED) --- */}
+              {/* Where to Watch */}
               {data.where_to_watch && (
-                  <div style={{ 
-                      display: 'flex', alignItems: 'flex-start', gap: '8px', 
-                      marginTop: '16px', color: '#6366F1', fontSize: '15px', fontWeight: '600' 
-                  }}>
-                      <div style={{ minWidth: '18px', display: 'flex', marginTop: '3px' }}> 
-                          <MonitorPlay size={18} />
-                      </div>
-                      
-                      {/* Check if it's a URL (Google Link) or Text (Providers) */}
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', color: '#6366F1', fontSize: '15px', fontWeight: '600' }}>
+                      <div style={{ minWidth: '18px', display: 'flex', marginTop: '3px' }}><MonitorPlay size={18} /></div>
                       {data.where_to_watch.includes('http') ? (
                          <a 
                            href={data.where_to_watch.replace('Click to find: ', '')}
-                           target="_blank"
-                           rel="noopener noreferrer"
-                           onClick={(e) => e.stopPropagation()} // Prevent opening modal
+                           target="_blank" rel="noopener noreferrer"
                            style={{ color: '#6366F1', textDecoration: 'underline', lineHeight: '1.4', cursor: 'pointer' }}
                          >
                            Find where to watch online
@@ -147,15 +155,49 @@ const MovieCard = ({ data, isLiked, onToggle }) => {
         </div>
       </div>
 
-      {/* --- FULL SCREEN MODAL --- */}
+      {/* --- TRAILER MODAL --- */}
+      {showTrailer && data.trailer_key && (
+        <div 
+            onClick={() => setShowTrailer(false)}
+            style={{
+                position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.9)', zIndex: 9999,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px'
+            }}
+        >
+            <div style={{ position: 'relative', width: '100%', maxWidth: '900px', aspectRatio: '16/9', backgroundColor: 'black', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 0 30px rgba(0,0,0,0.5)' }}>
+                <button 
+                    onClick={() => setShowTrailer(false)}
+                    style={{
+                        position: 'absolute', top: '-40px', right: '0px',
+                        background: 'none', border: 'none', color: 'white', cursor: 'pointer'
+                    }}
+                >
+                    <X size={32} />
+                </button>
+                
+                {/* The Video Player */}
+                <iframe 
+                    width="100%" 
+                    height="100%" 
+                    src={`https://www.youtube.com/embed/${data.trailer_key}?autoplay=1`} 
+                    title="YouTube video player" 
+                    frameBorder="0" 
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                    allowFullScreen
+                ></iframe>
+            </div>
+        </div>
+      )}
+
+      {/* --- POSTER MODAL --- */}
       {showFullPoster && (
         <div 
             onClick={() => setShowFullPoster(false)}
             style={{
                 position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
                 backgroundColor: 'rgba(0, 0, 0, 0.95)', zIndex: 9999,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px',
-                animation: 'fadeIn 0.2s ease-in-out'
+                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px'
             }}
         >
             <button 
@@ -170,14 +212,11 @@ const MovieCard = ({ data, isLiked, onToggle }) => {
                 <X size={32} />
             </button>
             <img 
-                src={fullSizeUrl} 
-                alt="Full Poster" 
-                onClick={(e) => e.stopPropagation()}
+                src={fullSizeUrl} alt="Full Poster" onClick={(e) => e.stopPropagation()}
                 style={{ maxWidth: '100%', maxHeight: '90vh', borderRadius: '12px', boxShadow: '0 0 20px rgba(0,0,0,0.5)', objectFit: 'contain' }}
             />
         </div>
       )}
-      <style>{`@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }`}</style>
     </>
   );
 };
