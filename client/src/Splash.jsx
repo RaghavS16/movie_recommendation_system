@@ -9,7 +9,7 @@ export default function Splash() {
   useEffect(() => {
     const timer = setTimeout(() => {
       navigate("/welcome");
-    }, 5000);
+    }, 5000000);
     return () => clearTimeout(timer);
   }, [navigate]);
 
@@ -33,8 +33,8 @@ export default function Splash() {
           // EXACT ORIGINAL STYLES KEPT
           style={{ 
             width: '50%', 
-            maxWidth: '350px', 
-            minWidth: '120px', 
+            maxWidth: '300px', 
+            minWidth: '100px', 
             height: 'auto', 
             objectFit: 'contain' ,
             marginBottom: '25px'
@@ -46,26 +46,27 @@ export default function Splash() {
           fontSize: '65px', 
           fontWeight: 'bold', 
           color: 'white', 
-          marginTop: '66px', // Changed from marginBottom to marginTop to push off the logo
+          marginTop: '20px', // Changed from marginBottom to marginTop to push off the logo
           marginBottom: '12px'
         }}>
             FilmoBot
         </h1>
-
+      <div style={{ paddingBottom: '190px', display: 'flex', justifyContent: 'center' }}>
+        <div style={{
+          width: '60px',
+          height: '60px',
+          borderRadius: '50%',
+          border: '4px solid #333',
+          borderTop: '4px solid #6366F1',
+          animation: 'spin 1s linear infinite',
+          marginTop: '30px'
+        }} />
+      </div>
       </div>
 
       {/* 2. Loading Spinner (Name -> Loading) */}
       {/* EXACT ORIGINAL STYLES KEPT */}
-      <div style={{ paddingBottom: '190px', display: 'flex', justifyContent: 'center' }}>
-        <div style={{
-          width: '75px',
-          height: '75px',
-          borderRadius: '50%',
-          border: '4px solid #333',
-          borderTop: '4px solid #6366F1',
-          animation: 'spin 1s linear infinite'
-        }} />
-      </div>
+
 
       <style>{`
         @keyframes spin { 
