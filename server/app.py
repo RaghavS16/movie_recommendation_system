@@ -198,8 +198,9 @@ def chat():
     # 2. DETERMINE INTENT (The Fix)
     # We only use Discovery Mode if the user EXPLICITLY asks for a genre, language, year, or uses keywords.
     # Otherwise, we assume they typed a specific Movie Title.
-    is_discovery_intent = (new_mood or new_code or year or wants_more or has_discovery_keywords)
+    year_wants_discovery = year and has_discovery_keywords
 
+    is_discovery_intent = (new_mood or new_code or year_wants_discovery or wants_more or has_discovery_keywords)
     # 3. UPDATE MEMORY (Only if it's a discovery request)
     if is_discovery_intent:
         if new_mood or new_code or year:
@@ -234,6 +235,8 @@ def chat():
         # --- SEARCH MODE (Specific Title) ---
         # Ignore memory, search exactly what the user typed
         print(f"🔎 SEARCH: '{user_input}'")
+        user.last_mood = None 
+        db.session.commit()
         results = search_movie(user_input)
         bot_response = f"Here are the top results for '{user_input}':"
 

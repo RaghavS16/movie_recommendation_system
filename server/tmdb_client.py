@@ -40,24 +40,28 @@ LANGUAGE_MAP = {
 
 def detect_mood(text):
     text = text.lower()
-    # Negative words to watch out for
     negations = ["not", "no", "don't", "dont", "hate", "avoid", "dislike"]
-
-    # 1. Direct Match with Negation Check
+    
+    words = text.split()
+    
     for mood, keywords in MOOD_KEYWORDS.items():
-        for word in keywords:
-            if word in text:
-                # Check the 3 words before the keyword for negation
-                index = text.find(word)
-                # Look at the chunk of text immediately preceding the keyword
-                preceding_text = text[max(0, index-20):index].split()
+        for keyword in keywords:
+            # Check if keyword exists in the user's text
+            if keyword in words:
+                # Find the index of the keyword in the word list
+                indices = [i for i, x in enumerate(words) if x == keyword]
                 
-                # If a negation word appears in the last 3 words, IGNORE this mood
-                if any(neg in preceding_text[-3:] for neg in negations):
-                    print(f"🚫 Negation detected: User said NOT '{word}', ignoring {mood}.")
-                    continue 
-                
-                return mood
+                for i in indices:
+                    # Check the 3 words appearing BEFORE this specific keyword usage
+                    preceding = words[max(0, i-3):i]
+                    
+                    # If ANY negation is found nearby, skip this keyword instance
+                    if any(neg in preceding for neg in negations):
+                        print(f"🚫 Negation detected: User said NOT '{keyword}'")
+                        continue # Check next instance or next keyword
+                    
+                    # If we found a keyword with NO negation nearby, return it!
+                    return mood
             
     # 2. Fuzzy Match (Simple fallback, assumes no typos in negations)
     words = text.split()
