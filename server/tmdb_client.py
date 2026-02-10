@@ -2,7 +2,7 @@
 import os
 import requests
 import re
-import difflib  # <--- NEW: For fixing typos
+import difflib
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -12,31 +12,23 @@ OMDB_API_KEY = os.getenv('OMDB_API_KEY')
 TMDB_BASE_URL = "https://api.themoviedb.org/3"
 OMDB_BASE_URL = "http://www.omdbapi.com/"
 
-# --- CONFIGURATION MAPS ---
-
+# --- CONFIGURATION MAPS (Same as before) ---
 MOOD_GENRES = {
-    "happy": "35|16",       # Comedy | Animation
-    "sad": "18|10749",      # Drama | Romance
-    "excited": "28|12",     # Action | Adventure
-    "scared": "27",         # Horror
-    "thrilling": "53",      # Thriller
-    "romantic": "10749",    # Romance
-    "bored": "9648|878",    # Mystery | Sci-Fi
-    "funny": "35",          # Comedy
-    "relaxing": "35|10751|14" # Comedy | Family | Fantasy
+    "happy": "35|16", "sad": "18|10749", "excited": "28|12",
+    "scared": "27", "thrilling": "53", "romantic": "10749",
+    "bored": "9648|878", "funny": "35", "relaxing": "35|10751|14"
 }
 
-# Expanded keywords for better detection
 MOOD_KEYWORDS = {
     "happy": ["happy", "joy", "good", "great", "cheerful", "laugh", "smile"],
-    "sad": ["sad", "depressed", "heavy", "heart", "crying", "upset", "blue", "down", "cry"],
+    "sad": ["sad", "depressed", "heavy", "heart", "crying", "upset", "blue", "down"],
     "excited": ["excited", "pumped", "action", "adventure", "thrill", "hyped", "fast"],
-    "scared": ["scared", "fear", "spooky", "horror", "creepy", "terrified", "ghost", "dark"],
+    "scared": ["scared", "fear", "spooky", "horror", "creepy", "terrified", "ghost"],
     "thrilling": ["thrill", "suspense", "tension", "edge of seat", "mystery"],
     "romantic": ["romantic", "love", "date", "crush", "kiss", "couple"],
-    "bored": ["bored", "boring", "something new", "interesting", "surprising"],
+    "bored": ["bored", "boring", "something new", "interesting"],
     "funny": ["funny", "hilarious", "comedy", "joke", "fun", "laughing"],
-    "relaxing": ["tired", "exhausted", "stress", "long day", "relax", "chill", "feel good", "calm", "sleepy"]
+    "relaxing": ["tired", "exhausted", "stress", "long day", "relax", "chill", "feel good"]
 }
 
 LANGUAGE_MAP = {
@@ -44,22 +36,33 @@ LANGUAGE_MAP = {
     "telugu": "te", "korean": "ko", "french": "fr", "spanish": "es", "japanese": "ja"
 }
 
-# --- HELPER FUNCTIONS ---
+# --- IMPROVED HELPER FUNCTIONS ---
 
 def detect_mood(text):
     text = text.lower()
-    
-    # 1. Direct Match
+    # Negative words to watch out for
+    negations = ["not", "no", "don't", "dont", "hate", "avoid", "dislike"]
+
+    # 1. Direct Match with Negation Check
     for mood, keywords in MOOD_KEYWORDS.items():
-        if any(word in text for word in keywords):
-            return mood
+        for word in keywords:
+            if word in text:
+                # Check the 3 words before the keyword for negation
+                index = text.find(word)
+                # Look at the chunk of text immediately preceding the keyword
+                preceding_text = text[max(0, index-20):index].split()
+                
+                # If a negation word appears in the last 3 words, IGNORE this mood
+                if any(neg in preceding_text[-3:] for neg in negations):
+                    print(f"🚫 Negation detected: User said NOT '{word}', ignoring {mood}.")
+                    continue 
+                
+                return mood
             
-    # 2. Fuzzy Match (Handle Typos like "tierd" or "actoin")
+    # 2. Fuzzy Match (Simple fallback, assumes no typos in negations)
     words = text.split()
     all_keywords = {word: mood for mood, keywords in MOOD_KEYWORDS.items() for word in keywords}
-    
     for word in words:
-        # Find closest match if it's at least 80% similar
         matches = difflib.get_close_matches(word, all_keywords.keys(), n=1, cutoff=0.8)
         if matches:
             return all_keywords[matches[0]]
@@ -68,25 +71,115 @@ def detect_mood(text):
 
 def detect_language(text):
     text = text.lower()
-    # 1. Direct Match
     for lang_name, code in LANGUAGE_MAP.items():
         if lang_name in text:
             return code, lang_name
-            
-    # 2. Fuzzy Match (Handle Typos like "taml", "hindhi")
-    words = text.split()
-    matches = difflib.get_close_matches(text, LANGUAGE_MAP.keys(), n=1, cutoff=0.8)
-    if matches:
-        matched_lang = matches[0]
-        return LANGUAGE_MAP[matched_lang], matched_lang
-        
     return None, None
 
 def detect_count(text):
     numbers = re.findall(r'\b\d+\b', text)
     return min(int(numbers[0]), 10) if numbers else 3
 
-# --- API FUNCTIONS WITH ERROR HANDLING ---
+def extract_year(text):
+    """Finds a year (e.g., 1990, 2024) in the input."""
+    match = re.search(r'\b(19|20)\d{2}\b', text)
+    return match.group(0) if match else None
+
+# --- API FUNCTIONS ---
+
+def get_trailer_key(movie_id):
+    try:
+        url = f"{TMDB_BASE_URL}/movie/{movie_id}/videos"
+        response = requests.get(url, params={"api_key": TMDB_API_KEY}, timeout=5)
+        results = response.json().get("results", [])
+        for video in results:
+            if video.get("site") == "YouTube" and video.get("type") == "Trailer":
+                return video.get("key")
+        return results[0].get("key") if results else None
+    except: return None
+
+def get_watch_providers(movie_id, movie_title):
+    try:
+        url = f"{TMDB_BASE_URL}/movie/{movie_id}/watch/providers"
+        response = requests.get(url, params={"api_key": TMDB_API_KEY}, timeout=5)
+        results = response.json().get("results", {}).get("IN", {})
+        
+        providers = []
+        if "flatrate" in results:
+            providers = [p["provider_name"] for p in results["flatrate"]]
+        
+        return ", ".join(list(set(providers))) if providers else f"Click to find: https://www.google.com/search?q=watch+{movie_title.replace(' ', '+')}+online"
+    except: return "Streaming info unavailable"
+
+def get_extended_details(title, year):
+    if not OMDB_API_KEY: return {"imdb_rating": "N/A", "cast": "N/A", "director": "N/A", "duration": "N/A"}
+    try:
+        response = requests.get(OMDB_BASE_URL, params={"apikey": OMDB_API_KEY, "t": title, "y": year}, timeout=5)
+        data = response.json()
+        if data.get("Response") == "True":
+            return {
+                "imdb_rating": data.get("imdbRating", "N/A"),
+                "cast": data.get("Actors", "N/A"),
+                "director": data.get("Director", "N/A"),
+                "duration": data.get("Runtime", "N/A")
+            }
+        return {"imdb_rating": "N/A", "cast": "N/A", "director": "N/A", "duration": "N/A"}
+    except: return {"imdb_rating": "N/A", "cast": "N/A", "director": "N/A", "duration": "N/A"}
+
+def search_movie(query):
+    try:
+        url = f"{TMDB_BASE_URL}/search/movie"
+        response = requests.get(url, params={"api_key": TMDB_API_KEY, "query": query}, timeout=5)
+        return response.json().get('results', [])
+    except: return []
+
+def discover_movies(mood=None, language_code=None, year=None, page=1):
+    url = f"{TMDB_BASE_URL}/discover/movie"
+    params = {
+        "api_key": TMDB_API_KEY,
+        "sort_by": "popularity.desc",
+        "vote_count.gte": 10, 
+        "page": page
+    }
+    
+    if mood: params["with_genres"] = MOOD_GENRES.get(mood)
+    if language_code: params["with_original_language"] = language_code
+    if year: params["primary_release_year"] = year
+
+    try:
+        response = requests.get(url, params=params, timeout=5)
+        return response.json().get('results', [])
+    except Exception as e:
+        print(f"API Error: {e}")
+        return []
+
+# server/tmdb_client.py
+
+def get_recommendations(movie_id, mood=None):
+    """Fetches movies similar to a specific movie ID, strictly filtering by mood if provided."""
+    url = f"{TMDB_BASE_URL}/movie/{movie_id}/recommendations"
+    try:
+        response = requests.get(url, params={"api_key": TMDB_API_KEY}, timeout=5)
+        results = response.json().get('results', [])
+
+        # --- NEW: Strict Genre Filtering ---
+        if mood and mood in MOOD_GENRES:
+            # 1. Get the allowed Genre IDs for this mood (e.g. "35|16" -> {35, 16})
+            allowed_genres = set(int(g) for g in MOOD_GENRES[mood].split('|'))
+            
+            filtered_results = []
+            for movie in results:
+                movie_genres = set(movie.get('genre_ids', []))
+                
+                # 2. Keep movie ONLY if it matches at least one genre from the mood
+                if not movie_genres.isdisjoint(allowed_genres):
+                    filtered_results.append(movie)
+            
+            # If filtering removes everything (rare), fallback to original results
+            return filtered_results if filtered_results else results
+
+        return results
+    except: return []
 
 class NetworkError(Exception):
     pass
@@ -98,99 +191,3 @@ def check_connection():
         return True
     except:
         return False
-
-def get_watch_providers(movie_id, movie_title):
-    try:
-        url = f"{TMDB_BASE_URL}/movie/{movie_id}/watch/providers"
-        response = requests.get(url, params={"api_key": TMDB_API_KEY}, timeout=5)
-        data = response.json()
-        results = data.get("results", {})
-        region_data = results.get("IN")
-        
-        providers = []
-        if region_data:
-            for key in ["flatrate", "rent", "buy"]:
-                if key in region_data:
-                    for p in region_data[key]:
-                        providers.append(p["provider_name"] if key == "flatrate" else f"{key.title()}: {p['provider_name']}")
-        
-        return ", ".join(list(set(providers))) if providers else f"Click to find: https://www.google.com/search?q=watch+{movie_title.replace(' ', '+')}+online"
-    except requests.exceptions.ConnectionError:
-        return "Streaming info unavailable (Network Error)"
-    except:
-        return f"Click to find: https://www.google.com/search?q=watch+{movie_title.replace(' ', '+')}+online"
-
-def get_extended_details(title, year):
-    default_data = {"imdb_rating": "N/A", "cast": "N/A", "director": "N/A", "duration": "N/A"}
-    if not OMDB_API_KEY: return default_data
-    try:
-        response = requests.get(OMDB_BASE_URL, params={"apikey": OMDB_API_KEY, "t": title, "y": year}, timeout=5)
-        data = response.json()
-        if data.get("Response") == "True":
-            return {
-                "imdb_rating": data.get("imdbRating", "N/A"),
-                "cast": data.get("Actors", "N/A"),
-                "director": data.get("Director", "N/A"),
-                "duration": data.get("Runtime", "N/A")
-            }
-        return default_data
-    except: return default_data
-
-def search_movie(query):
-    try:
-        url = f"{TMDB_BASE_URL}/search/movie"
-        response = requests.get(url, params={"api_key": TMDB_API_KEY, "query": query}, timeout=10)
-        return response.json().get('results', [])
-    except requests.exceptions.ConnectionError:
-        raise NetworkError("Failed to connect to TMDb")
-    except: 
-        return []
-
-# server/tmdb_client.py
-
-def get_trailer_key(movie_id):
-    """
-    Fetches the YouTube Video Key for a given movie ID.
-    Returns the key string (e.g., 'd9MyW72ELq0') or None.
-    """
-    try:
-        url = f"{TMDB_BASE_URL}/movie/{movie_id}/videos"
-        params = {"api_key": TMDB_API_KEY}
-        response = requests.get(url, params=params, timeout=5)
-        data = response.json()
-        
-        results = data.get("results", [])
-        
-        # Priority 1: "Trailer" on YouTube
-        for video in results:
-            if video.get("site") == "YouTube" and video.get("type") == "Trailer":
-                return video.get("key")
-        
-        # Priority 2: Any YouTube video (Teaser, Clip) if no Trailer found
-        if results and results[0].get("site") == "YouTube":
-             return results[0].get("key")
-
-        return None
-    except:
-        return None
-    
-def discover_movies(mood=None, language_code=None):
-    url = f"{TMDB_BASE_URL}/discover/movie"
-    params = {
-        "api_key": TMDB_API_KEY,
-        "sort_by": "popularity.desc",
-        "vote_count.gte": 10, 
-        "page": 1
-    }
-    
-    if mood: params["with_genres"] = MOOD_GENRES.get(mood)
-    if language_code: params["with_original_language"] = language_code
-
-    try:
-        response = requests.get(url, params=params, timeout=10)
-        return response.json().get('results', [])
-    except requests.exceptions.ConnectionError:
-        raise NetworkError("Failed to connect to TMDb")
-    except Exception as e:
-        print(f"API Error: {e}")
-        return []

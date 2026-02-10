@@ -1,13 +1,11 @@
 // src/MovieCard.jsx
 import React, { useState } from 'react';
-import { Star, Clock, MonitorPlay, Heart, X, Youtube, PlayCircle } from 'lucide-react'; // Added Icons
+import { Star, Clock, MonitorPlay, Heart, X, PlayCircle, Sparkles } from 'lucide-react'; 
 import { COLORS } from './theme';
 
-const MovieCard = ({ data, isLiked, onToggle }) => {
+const MovieCard = ({ data, isLiked, onToggle, onMoreLikeThis }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showFullPoster, setShowFullPoster] = useState(false);
-  
-  // NEW: State for Trailer Modal
   const [showTrailer, setShowTrailer] = useState(false);
 
   // 1. Image Logic
@@ -105,33 +103,48 @@ const MovieCard = ({ data, isLiked, onToggle }) => {
 
           <div style={{ paddingTop: '16px', borderTop: '1px solid #333' }}>
               
-              {/* --- NEW: TRAILER BUTTON --- */}
-              <div style={{ marginBottom: '16px' }}>
+              {/* ACTION BUTTONS ROW */}
+              <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
+                
+                {/* Trailer Button */}
                 {data.trailer_key ? (
                    <button 
                      onClick={() => setShowTrailer(true)}
                      style={{
-                        width: '100%',
-                        backgroundColor: '#FF0000', color: 'white', border: 'none',
+                        flex: 1, backgroundColor: '#FF0000', color: 'white', border: 'none',
                         padding: '10px', borderRadius: '8px', cursor: 'pointer',
                         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-                        fontSize: '15px', fontWeight: 'bold', transition: 'background 0.2s'
+                        fontSize: '14px', fontWeight: 'bold', transition: 'background 0.2s'
                      }}
-                     onMouseEnter={(e) => e.target.style.backgroundColor = '#cc0000'}
-                     onMouseLeave={(e) => e.target.style.backgroundColor = '#FF0000'}
                    >
-                     <PlayCircle size={20} fill="white" color="#FF0000" /> 
-                     Watch Trailer
+                     <PlayCircle size={18} fill="white" color="#FF0000" /> 
+                     Trailer
                    </button>
                 ) : (
                    <button disabled style={{ 
-                      width: '100%', backgroundColor: '#333', color: '#666', 
+                      flex: 1, backgroundColor: '#333', color: '#666', 
                       border: 'none', padding: '10px', borderRadius: '8px', 
                       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
                    }}>
-                      <X size={18} /> Trailer Unavailable
+                      <X size={18} /> No Trailer
                    </button>
                 )}
+
+                {/* CONDITIONALLY RENDER 'SIMILAR' BUTTON */}
+                {onMoreLikeThis && (
+                    <button 
+                        onClick={() => onMoreLikeThis(data.id)} 
+                        style={{ 
+                            flex: 1, backgroundColor: '#6366F1', color: 'white', border: 'none', 
+                            padding: '10px', borderRadius: '8px', cursor: 'pointer', 
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', 
+                            fontSize: '14px', fontWeight: 'bold' 
+                        }}
+                    >
+                        <Sparkles size={18} /> Similar
+                    </button>
+                )}
+                
               </div>
 
               {/* Where to Watch */}
@@ -175,14 +188,10 @@ const MovieCard = ({ data, isLiked, onToggle }) => {
                 >
                     <X size={32} />
                 </button>
-                
-                {/* The Video Player */}
                 <iframe 
-                    width="100%" 
-                    height="100%" 
+                    width="100%" height="100%" 
                     src={`https://www.youtube.com/embed/${data.trailer_key}?autoplay=1`} 
-                    title="YouTube video player" 
-                    frameBorder="0" 
+                    title="YouTube video player" frameBorder="0" 
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
                     allowFullScreen
                 ></iframe>

@@ -12,12 +12,13 @@ from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 
-# server/app.py
+# Import updated functions
 from tmdb_client import (
     search_movie, discover_movies, get_extended_details, 
     detect_mood, detect_language, get_watch_providers, detect_count,
-    get_trailer_key  # <--- ADD THIS
+    get_trailer_key, get_recommendations, extract_year
 )
+
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
 
 app = Flask(__name__)
@@ -54,9 +55,10 @@ class User(db.Model):
     reset_token = db.Column(db.String(100), nullable=True)
     token_expiry = db.Column(db.DateTime, nullable=True)
     
-    # NEW: CONVERSATION MEMORY (This stores the context)
+    # MEMORY CONTEXT
     last_mood = db.Column(db.String(50), nullable=True)
     last_language = db.Column(db.String(10), nullable=True)
+    last_page = db.Column(db.Integer, default=1) # <--- NEW: Pagination Memory
 
 class Watchlist(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -72,7 +74,6 @@ class Watchlist(db.Model):
     where_to_watch = db.Column(db.String(500))
     trailer_key = db.Column(db.String(50))
     added_on = db.Column(db.DateTime, default=datetime.utcnow)
-
 # --- ROUTES ---
 
 @app.route('/')
@@ -148,7 +149,8 @@ def get_persona_response(mood, lang_name, count):
     
     return f"{intro} Here are {count} highly-rated movies{lang_str}:"
 
-# --- UPDATED CHAT ROUTE ---
+# server/app.py
+
 @app.route('/chat', methods=['POST'])
 @jwt_required()
 def chat():
@@ -158,127 +160,137 @@ def chat():
     data = request.get_json()
     user_input = data.get('message', '').strip()
     
-    # 0. GREETING CHECK (Add small talk)
-    greetings = ["hi", "hello", "hey", "hola", "greetings", "sup", "what's up", "how are you"]
-    if user_input.lower() in greetings:
-        return jsonify({
-            "bot_response": "Hello there! 👋 I'm FilmoBot.\n\nI can help you find the perfect movie based on how you feel.\n\nTry saying: **'I am tired'** or **'I want a Tamil Action movie'**.",
-            "movies": []
-        })
+    # 0. SPECIAL HANDLERS
+    
+    # Handle "More Like This"
+    if user_input.startswith("recommend_id:"):
+        ref_movie_id = user_input.split(":")[1]
+        results = get_recommendations(ref_movie_id, mood=user.last_mood)
+        bot_response = f"Here are some similar movies:"
+        return process_and_return(results, bot_response, 5, sort=False)
 
+    # Handle Greetings
+    greetings = ["hi", "hello", "hey", "hola"]
+    if user_input.lower() in greetings:
+        return jsonify({"bot_response": "Hello! I'm FilmoBot. 🎬 Tell me what you're in the mood for.", "movies": []})
+
+    # Handle Reset
+    if "reset" in user_input.lower() or "clear" in user_input.lower():
+        user.last_mood = None
+        user.last_language = None
+        user.last_page = 1
+        db.session.commit()
+        return jsonify({"bot_response": "Memory wiped! 🧹 What do you want to watch?", "movies": []})
+
+    # 1. ANALYZE INPUT
+    new_mood = detect_mood(user_input)
+    new_code, new_lang_name = detect_language(user_input)
+    year = extract_year(user_input)
+    count = detect_count(user_input)
+    
+    # Keywords that imply the user wants a LIST of recommendations
+    discovery_keywords = ["suggest", "recommend", "show", "movie", "film", "best", "top", "find", "want", "more", "page"]
+    
+    # Check if user input implies Discovery
+    has_discovery_keywords = any(word in user_input.lower() for word in discovery_keywords)
+    wants_more = any(w in user_input.lower() for w in ["more", "next", "page"])
+    
+    # 2. DETERMINE INTENT (The Fix)
+    # We only use Discovery Mode if the user EXPLICITLY asks for a genre, language, year, or uses keywords.
+    # Otherwise, we assume they typed a specific Movie Title.
+    is_discovery_intent = (new_mood or new_code or year or wants_more or has_discovery_keywords)
+
+    # 3. UPDATE MEMORY (Only if it's a discovery request)
+    if is_discovery_intent:
+        if new_mood or new_code or year:
+            user.last_page = 1 # Reset page on new topic
+            if new_mood: user.last_mood = new_mood
+            if new_code: user.last_language = new_code
+        elif wants_more:
+            user.last_page = (user.last_page or 1) + 1
+        db.session.commit()
+
+    # 4. EXECUTE LOGIC
     results = []
     bot_response = ""
 
-    try:
-        # 1. ANALYZE INPUT (Now with Fuzzy Matching for Typos)
-        new_mood = detect_mood(user_input)
-        new_code, new_lang_name = detect_language(user_input)
-        count = detect_count(user_input)
-
-        # 2. DETECT INTENT
-        trigger_words = ["suggest", "recommend", "show me", "find", "more", "another", "top rated", "best", "movie"]
-        is_discovery_intent = False
-        
-        if new_mood or new_code:
-            is_discovery_intent = True
-        elif any(word in user_input.lower() for word in trigger_words):
-            is_discovery_intent = True
-
-        # 3. MEMORY UPDATE
-        if new_mood: user.last_mood = new_mood
-        if new_code: user.last_language = new_code
-        
-        if "reset" in user_input.lower() or "clear" in user_input.lower():
-            user.last_mood = None
-            user.last_language = None
-            db.session.commit()
-            return jsonify({"bot_response": "Memory wiped! 🧹 What are you in the mood for now?", "movies": []})
-
-        db.session.commit()
-
-        # 4. EXECUTE SEARCH OR DISCOVERY
+    if is_discovery_intent:
+        # --- DISCOVERY MODE (Uses Memory) ---
         final_mood = user.last_mood
         final_lang = user.last_language
-
-        if is_discovery_intent and (final_mood or final_lang):
-            print(f"🔍 DISCOVERY: Mood={final_mood}, Lang={final_lang}")
-            results = discover_movies(mood=final_mood, language_code=final_lang)
-            
-            # Use the new Persona Generator
-            bot_response = get_persona_response(final_mood, new_lang_name or "your preferred language", count)
-            
-        else:
-            print(f"🔎 DIRECT SEARCH: '{user_input}'")
-            results = search_movie(user_input)
-            bot_response = f"Here are the top results for '{user_input}':"
-            
-            if not results and (final_mood or final_lang):
-                bot_response = f"I couldn't find a movie named '{user_input}'. 🤔 But since you like {final_mood or 'good'} movies, try these:"
-                results = discover_movies(mood=final_mood, language_code=final_lang)
-
-        # 5. HANDLE EMPTY RESULTS
-        if not results:
-            return jsonify({
-                "bot_response": "I searched everywhere, but I couldn't find any movies matching that. 🧐\n\nTry checking the spelling or ask for a different genre (e.g., 'Funny movies').", 
-                "movies": []
-            })
+        current_page = user.last_page
         
-        # 6. FETCH DETAILS & SORT
-        candidate_movies = []
-        limit = 20 if is_discovery_intent else 5
+        print(f"🔍 DISCOVER: Mood={final_mood}, Lang={final_lang}, Year={year}, Page={current_page}")
+        results = discover_movies(mood=final_mood, language_code=final_lang, year=year, page=current_page)
         
-        for movie in results[:limit]:
-            title = movie.get('title')
-            year = movie.get('release_date', '')[:4]
-            details = get_extended_details(title, year)
+        if not results and current_page > 1:
+            return jsonify({"bot_response": "That's all the movies I could find for this category!", "movies": []})
             
-            candidate_movies.append({
-                "id": movie.get('id'),
-                "title": title,
-                "overview": movie.get('overview'),
-                "poster_path": movie.get('poster_path'),
-                "tmdb_rating": movie.get('vote_average'),
-                "imdb_rating": details['imdb_rating'],
-                "cast": details['cast'],
-                "director": details['director'],
-                "duration": details['duration'],
-            })
+        # Personalized Response
+        mood_str = final_mood if final_mood else "popular"
+        bot_response = get_persona_response(final_mood, final_lang, count) if final_mood else f"Here are {count} {mood_str} movies:"
 
-        # Sort by IMDb -> TMDb
-        def get_rating_score(m):
-            imdb = m.get('imdb_rating', 'N/A')
-            if imdb and imdb != 'N/A':
-                try: return float(imdb)
-                except: pass
-            tmdb = m.get('tmdb_rating', 0)
-            try: return float(tmdb)
-            except: return 0
+    else:
+        # --- SEARCH MODE (Specific Title) ---
+        # Ignore memory, search exactly what the user typed
+        print(f"🔎 SEARCH: '{user_input}'")
+        results = search_movie(user_input)
+        bot_response = f"Here are the top results for '{user_input}':"
 
-        candidate_movies.sort(key=get_rating_score, reverse=True)
+        # Fallback: If search fails, but we have memory, offer a suggestion
+        if not results and (user.last_mood or user.last_language):
+            bot_response = f"I couldn't find a movie named '{user_input}'. But based on your preferences, here are some recommendations:"
+            results = discover_movies(mood=user.last_mood, language_code=user.last_language)
+
+    if not results:
+        return jsonify({"bot_response": "I couldn't find anything matching that.", "movies": []})
+
+    # For specific search, show exactly what was found (usually 1 or 2 relevant matches)
+    # For discovery, show the requested count
+    limit = 5 if not is_discovery_intent else count
+    
+    return process_and_return(results, bot_response, limit, sort=True)
+
+def process_and_return(results, bot_response, count, sort=True):
+    """
+    Helper to fetch details and format response.
+    sort=True  -> Sorts movies by Rating (Default behavior).
+    sort=False -> Keeps original order (Good for 'Similar' movies).
+    """
+    candidate_movies = []
+    
+    # Optimization: If not sorting, we only need to fetch details for 'count' movies.
+    # If sorting, we fetch 10 to find the best rated ones, then pick top 'count'.
+    limit = 10 if sort else count 
+    
+    for movie in results[:limit]: 
+        title = movie.get('title')
+        year = movie.get('release_date', '')[:4]
+        details = get_extended_details(title, year)
         
-        final_movies = []
-        for movie in candidate_movies[:count]:
-            movie['where_to_watch'] = get_watch_providers(movie['id'], movie['title'])
-            movie['trailer_key'] = get_trailer_key(movie['id'])
-            final_movies.append(movie)
+        candidate_movies.append({
+            "id": movie.get('id'),
+            "title": title,
+            "overview": movie.get('overview'),
+            "poster_path": movie.get('poster_path'),
+            "tmdb_rating": movie.get('vote_average'),
+            "imdb_rating": details['imdb_rating'],
+            "cast": details['cast'],
+            "director": details['director'],
+            "duration": details['duration'],
+        })
 
-        return jsonify({"bot_response": bot_response, "movies": final_movies})
+    # --- ONLY SORT IF REQUESTED ---
+    if sort:
+        candidate_movies.sort(key=lambda m: float(m['imdb_rating']) if m['imdb_rating'] != 'N/A' else m['tmdb_rating'] or 0, reverse=True)
+    
+    final_movies = []
+    for movie in candidate_movies[:count]:
+        movie['where_to_watch'] = get_watch_providers(movie['id'], movie['title'])
+        movie['trailer_key'] = get_trailer_key(movie['id'])
+        final_movies.append(movie)
 
-    # --- ERROR HANDLING LIKE A PRO ---
-    except Exception as e:
-        print(f"❌ SERVER ERROR: {e}")
-        # Check if it's a network issue message
-        if "Network Error" in str(e) or "Failed to connect" in str(e):
-            return jsonify({
-                "bot_response": "I'm having trouble connecting to the movie database right now. 🔌\n\nPlease check your **internet connection** and try again.",
-                "movies": []
-            })
-        else:
-            return jsonify({
-                "bot_response": "Oops! Something went wrong on my end. 😵‍💫 Please try again in a moment.",
-                "movies": []
-            })
-
+    return jsonify({"bot_response": bot_response, "movies": final_movies})
 @app.route('/add-watchlist', methods=['POST'])
 @jwt_required()
 def add_watchlist():
