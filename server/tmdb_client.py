@@ -64,6 +64,14 @@ def detect_mood(text):
         found_moods.sort(key=lambda x: x[0]) 
         return found_moods[-1][1]
             
+    # Fuzzy Match Fallback (Only if direct match failed)
+    words = text.split()
+    all_keywords = {word: mood for mood, keywords in MOOD_KEYWORDS.items() for word in keywords}
+    for word in words:
+        matches = difflib.get_close_matches(word, all_keywords.keys(), n=1, cutoff=0.8)
+        if matches:
+            return all_keywords[matches[0]]
+
     return None
 
 def detect_language(text):
