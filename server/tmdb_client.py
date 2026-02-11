@@ -42,34 +42,27 @@ def detect_mood(text):
     text = text.lower()
     negations = ["not", "no", "don't", "dont", "hate", "avoid", "dislike"]
     
-    words = text.split()
-    
+    # Store all found moods and their position in the text
+    found_moods = [] 
+
     for mood, keywords in MOOD_KEYWORDS.items():
-        for keyword in keywords:
-            # Check if keyword exists in the user's text
-            if keyword in words:
-                # Find the index of the keyword in the word list
-                indices = [i for i, x in enumerate(words) if x == keyword]
+        for word in keywords:
+            if word in text:
+                index = text.find(word)
+                preceding_text = text[max(0, index-20):index].split()
                 
-                for i in indices:
-                    # Check the 3 words appearing BEFORE this specific keyword usage
-                    preceding = words[max(0, i-3):i]
-                    
-                    # If ANY negation is found nearby, skip this keyword instance
-                    if any(neg in preceding for neg in negations):
-                        print(f"🚫 Negation detected: User said NOT '{keyword}'")
-                        continue # Check next instance or next keyword
-                    
-                    # If we found a keyword with NO negation nearby, return it!
-                    return mood
-            
-    # 2. Fuzzy Match (Simple fallback, assumes no typos in negations)
-    words = text.split()
-    all_keywords = {word: mood for mood, keywords in MOOD_KEYWORDS.items() for word in keywords}
-    for word in words:
-        matches = difflib.get_close_matches(word, all_keywords.keys(), n=1, cutoff=0.8)
-        if matches:
-            return all_keywords[matches[0]]
+                # If negated, skip it
+                if any(neg in preceding_text[-3:] for neg in negations):
+                    continue 
+                
+                # If valid, add to list with its position index
+                found_moods.append((index, mood))
+
+    # If we found valid moods, return the one that appears LAST in the sentence
+    if found_moods:
+        # Sort by index (position in sentence) and pick the last one
+        found_moods.sort(key=lambda x: x[0]) 
+        return found_moods[-1][1]
             
     return None
 
@@ -106,15 +99,21 @@ def get_watch_providers(movie_id, movie_title):
     try:
         url = f"{TMDB_BASE_URL}/movie/{movie_id}/watch/providers"
         response = requests.get(url, params={"api_key": TMDB_API_KEY}, timeout=5)
-        results = response.json().get("results", {}).get("IN", {})
+        data = response.json()
+        all_results = data.get("results", {})
+        
+        # --- FIX: Check IN first, fallback to US if not available ---
+        # This prevents "Streaming info unavailable" if the movie is only on US Netflix
+        region_data = all_results.get("IN") or all_results.get("US") or {}
         
         providers = []
-        if "flatrate" in results:
-            providers = [p["provider_name"] for p in results["flatrate"]]
+        if "flatrate" in region_data:
+            providers = [p["provider_name"] for p in region_data["flatrate"]]
         
         return ", ".join(list(set(providers))) if providers else f"Click to find: https://www.google.com/search?q=watch+{movie_title.replace(' ', '+')}+online"
-    except: return "Streaming info unavailable"
-
+    except:
+        return "Streaming info unavailable"
+    
 def get_extended_details(title, year):
     if not OMDB_API_KEY: return {"imdb_rating": "N/A", "cast": "N/A", "director": "N/A", "duration": "N/A"}
     try:

@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 import { Mail, User, Shield, Edit2, Check, X, Camera } from 'lucide-react';
 import { COLORS, COMMON_STYLES } from './theme';
+import { API_BASE_URL } from "./config";
 
 // --- ADAPTED FOCUS INPUT FOR PROFILE LAYOUT ---
 const FocusInput = ({ value, onChange, type = "text" }) => {
@@ -40,7 +41,9 @@ const FocusInput = ({ value, onChange, type = "text" }) => {
 
 export default function ProfilePage({ user, setUser }) {
   const [isEditing, setIsEditing] = useState(false);
-  
+  const [loading, setLoading] = useState(false); // <--- NEW: Loading State
+  // NEW: Store the raw file object for upload
+  const [imageFile, setImageFile] = useState(null);
   const [formData, setFormData] = useState({
     username: '',
     email: '',
@@ -57,23 +60,75 @@ export default function ProfilePage({ user, setUser }) {
     }
   }, [user]);
 
-  const handleSave = () => {
-    setUser({ 
-      ...user, 
-      username: formData.username,
-      email: formData.email,
-      profileImage: formData.profileImage 
-    });
-    
-    localStorage.setItem("username", formData.username);
-    localStorage.setItem("email", formData.email);
-    if (formData.profileImage) {
-        localStorage.setItem("profileImage", formData.profileImage);
+const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+        setImageFile(file); // Save raw file for API upload
+        
+        // Create preview for UI
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            setFormData({ ...formData, profileImage: reader.result });
+        };
+        reader.readAsDataURL(file);
     }
-
-    setIsEditing(false);
   };
 
+  // --- UPDATED: REAL API CALL ---
+  const handleSave = async () => {
+    setLoading(true);
+    const token = localStorage.getItem("token");
+
+    try {
+        const data = new FormData();
+        data.append("username", formData.username);
+        data.append("email", formData.email);
+        
+        // Only append image if user selected a new one
+        if (imageFile) {
+            data.append("profileImage", imageFile);
+        }
+
+        const response = await fetch(`${API_BASE_URL}/update-profile`, {
+            method: "PUT",
+            headers: {
+                "Authorization": `Bearer ${token}`
+                // Note: Do NOT set Content-Type header manually when using FormData
+            },
+            body: data
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            
+            // 1. Update Global State
+            setUser({ 
+                ...user, 
+                username: result.username,
+                email: result.email,
+                profileImage: result.profile_image 
+            });
+            
+            // 2. Update Local Storage so changes persist on refresh
+            localStorage.setItem("username", result.username);
+            localStorage.setItem("email", result.email);
+            if (result.profile_image) {
+                localStorage.setItem("profileImage", result.profile_image);
+            }
+
+            setIsEditing(false);
+            setImageFile(null); // Reset file
+            alert("Profile updated successfully!");
+        } else {
+            alert("Failed to update profile. Please try again.");
+        }
+    } catch (error) {
+        console.error("Update Error:", error);
+        alert("An error occurred while updating.");
+    } finally {
+        setLoading(false);
+    }
+  };
   const handleCancel = () => {
     setFormData({
         username: user.username || '',
@@ -83,16 +138,6 @@ export default function ProfilePage({ user, setUser }) {
     setIsEditing(false);
   };
 
-  const handleImageChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            setFormData({ ...formData, profileImage: reader.result });
-        };
-        reader.readAsDataURL(file);
-    }
-  };
 
   return (
     <div style={{ display: 'flex', height: '100vh', backgroundColor: COLORS.bg, fontFamily: "'Inter', sans-serif" }}>

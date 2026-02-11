@@ -390,6 +390,40 @@ def reset_password():
     db.session.commit()
     return jsonify({"message": "Password updated"}), 200
 
+@app.route('/update-profile', methods=['PUT'])
+@jwt_required()
+def update_profile():
+    current_user_id = get_jwt_identity()
+    user = db.session.get(User, int(current_user_id))
+    
+    # Handle Text Data
+    username = request.form.get('username')
+    email = request.form.get('email')
+    
+    if username: user.username = username
+    if email: user.email = email
+    
+    # Handle Image Upload
+    file = request.files.get('profileImage')
+    if file:
+        filename = secure_filename(file.filename)
+        # Add timestamp to make filename unique
+        filename = f"{datetime.now().timestamp()}_{filename}"
+        file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+        user.profile_image = filename
+        
+    db.session.commit()
+    
+    # Return full URL so frontend can display it
+    image_url = f"http://localhost:5000/uploads/{user.profile_image}" if user.profile_image else None
+    
+    return jsonify({
+        "message": "Profile updated!",
+        "username": user.username,
+        "email": user.email,
+        "profile_image": image_url
+    }), 200
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
