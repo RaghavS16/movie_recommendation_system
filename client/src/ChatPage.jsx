@@ -1,7 +1,7 @@
 // src/ChatPage.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Trash2 } from 'lucide-react';
-import { useNavigate, useLocation } from 'react-router-dom'; // Added useLocation
+import { useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import MovieCard from './MovieCard';
 import { COLORS } from './theme';
@@ -9,48 +9,79 @@ import { API_BASE_URL } from "./config";
 
 export default function ChatPage({ watchlist, onToggleWatchlist }) {
   const navigate = useNavigate();
-  const location = useLocation(); // Hook to get navigation state
+  const location = useLocation(); 
   const messagesEndRef = useRef(null);
   
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  // Load Sessions
+  // Default messages
+  const defaultMsg = [{ type: 'bot', content: "Hello! I'm FilmoBot. 🎬 Ask me for a movie recommendation!" }];
+  const [messages, setMessages] = useState(defaultMsg);
+  const [currentSessionId, setCurrentSessionId] = useState(null);
+
+  // Load Sessions from LocalStorage initially for speed
   const [sessions, setSessions] = useState(() => {
      const saved = localStorage.getItem("chat_sessions");
      return saved ? JSON.parse(saved) : [];
   });
-
-  const [currentSessionId, setCurrentSessionId] = useState(null);
-
-  // Default messages
-  const defaultMsg = [{ type: 'bot', content: "Hello! I'm FilmoBot. 🎬 Ask me for a movie recommendation!" }];
-  const [messages, setMessages] = useState(defaultMsg);
 
   const scrollToBottom = () => { 
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); 
   };
   useEffect(scrollToBottom, [messages]);
 
-  // Save Sessions
+  // --- NEW: FETCH SESSIONS FROM DATABASE ON LOAD ---
+  useEffect(() => {
+    const fetchCloudSessions = async () => {
+        const token = localStorage.getItem("token");
+        if (!token) return;
+        try {
+            const res = await fetch(`${API_BASE_URL}/get-sessions`, {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const cloudData = await res.json();
+                setSessions(cloudData); // Override local storage with real DB data
+                localStorage.setItem("chat_sessions", JSON.stringify(cloudData));
+            }
+        } catch (error) { console.error("Failed to load cloud sessions", error); }
+    };
+    fetchCloudSessions();
+  }, []);
+
+  // Save Sessions locally as backup
   useEffect(() => {
     localStorage.setItem("chat_sessions", JSON.stringify(sessions));
   }, [sessions]);
 
-  // --- NEW: CHECK FOR INCOMING SESSION FROM PROFILE/WATCHLIST ---
+  // Check for incoming session from Profile/Watchlist
   useEffect(() => {
-      // If we navigated here with a sessionId (e.g., from Profile page Sidebar), load it
       if (location.state && location.state.sessionId) {
           const targetId = location.state.sessionId;
           const session = sessions.find(s => s.id === targetId);
           if (session) {
               setCurrentSessionId(targetId);
               setMessages(session.messages);
-              // Clear state so refresh doesn't keep resetting
               window.history.replaceState({}, document.title);
           }
       }
   }, [location.state, sessions]);
+
+  // --- NEW: HELPER TO SYNC TO DATABASE ---
+  const syncSessionToDB = async (sessionData) => {
+    const token = localStorage.getItem("token");
+    try {
+        await fetch(`${API_BASE_URL}/sync-session`, {
+            method: "POST",
+            headers: { 
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify(sessionData)
+        });
+    } catch (error) { console.error("Sync failed", error); }
+  };
 
   const handleNewChat = () => {
      setCurrentSessionId(null);
@@ -65,14 +96,22 @@ export default function ChatPage({ watchlist, onToggleWatchlist }) {
      }
   };
 
-  const handleDeleteSession = (sessionId) => {
+  // --- UPDATED: DELETE FROM DATABASE ---
+  const handleDeleteSession = async (sessionId) => {
       if (window.confirm("Are you sure you want to delete this chat?")) {
+          // Update UI instantly
           const updatedSessions = sessions.filter(s => s.id !== sessionId);
           setSessions(updatedSessions);
+          if (currentSessionId === sessionId) handleNewChat();
           
-          if (currentSessionId === sessionId) {
-              handleNewChat();
-          }
+          // Tell Database to delete it
+          const token = localStorage.getItem("token");
+          try {
+              await fetch(`${API_BASE_URL}/delete-session/${sessionId}`, {
+                  method: "DELETE",
+                  headers: { "Authorization": `Bearer ${token}` }
+              });
+          } catch (error) { console.error("Failed to delete from cloud", error); }
       }
   };
 
@@ -109,22 +148,28 @@ export default function ChatPage({ watchlist, onToggleWatchlist }) {
         }
         setMessages([...updatedMessages]);
 
+        // --- UPDATED: SAVE TO DATABASE ---
         if (!isHiddenCommand) { 
             if (currentSessionId) {
-                setSessions(prev => prev.map(s => 
-                    s.id === currentSessionId ? { ...s, messages: updatedMessages } : s
-                ));
+                // Update existing
+                const existingTitle = sessions.find(s => s.id === currentSessionId)?.title || "Conversation";
+                const updatedSession = { id: currentSessionId, title: existingTitle, messages: updatedMessages };
+                
+                setSessions(prev => prev.map(s => s.id === currentSessionId ? updatedSession : s));
+                syncSessionToDB(updatedSession); // Save to cloud
             } else {
+                // Create new
                 const newId = Date.now();
                 const newTitle = text.length > 20 ? text.substring(0, 20) + "..." : text;
                 const newSession = {
                     id: newId,
                     title: newTitle,
-                    messages: updatedMessages,
-                    date: new Date().toISOString()
+                    messages: updatedMessages
                 };
+                
                 setSessions(prev => [newSession, ...prev]);
                 setCurrentSessionId(newId);
+                syncSessionToDB(newSession); // Save to cloud
             }
         }
     } catch (error) {

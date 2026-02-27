@@ -1,5 +1,6 @@
 # server/app.py
 import os
+import json
 import secrets
 import random
 from datetime import datetime, timedelta
@@ -31,6 +32,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'filmobot.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JWT_SECRET_KEY'] = os.getenv('SECRET_KEY', 'default-key')
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
 app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
@@ -74,6 +76,14 @@ class Watchlist(db.Model):
     where_to_watch = db.Column(db.String(500))
     trailer_key = db.Column(db.String(50))
     added_on = db.Column(db.DateTime, default=datetime.utcnow)
+
+class ChatSession(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    session_id = db.Column(db.String(50), nullable=False) # Links to frontend's Date.now() ID
+    title = db.Column(db.String(100), nullable=False)
+    messages = db.Column(db.Text, nullable=False) # Stores the messages array as a JSON string
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
 # --- ROUTES ---
 
 @app.route('/')
@@ -424,6 +434,56 @@ def update_profile():
         "profile_image": image_url
     }), 200
 
+@app.route('/sync-session', methods=['POST'])
+@jwt_required()
+def sync_session():
+    current_user_id = get_jwt_identity()
+    data = request.get_json()
+    
+    session_id = str(data.get('id'))
+    title = data.get('title')
+    messages = json.dumps(data.get('messages', [])) # Convert list to JSON string
+    
+    # Check if session already exists for this user
+    chat_session = ChatSession.query.filter_by(user_id=int(current_user_id), session_id=session_id).first()
+    
+    if chat_session:
+        # Update existing session
+        chat_session.messages = messages
+        chat_session.updated_at = datetime.utcnow()
+    else:
+        # Create new session
+        chat_session = ChatSession(user_id=int(current_user_id), session_id=session_id, title=title, messages=messages)
+        db.session.add(chat_session)
+        
+    db.session.commit()
+    return jsonify({"message": "Session synced to cloud"}), 200
+
+@app.route('/get-sessions', methods=['GET'])
+@jwt_required()
+def get_sessions():
+    current_user_id = get_jwt_identity()
+    # Fetch all sessions for this user, newest first
+    sessions = ChatSession.query.filter_by(user_id=int(current_user_id)).order_by(ChatSession.updated_at.desc()).all()
+    
+    output = []
+    for s in sessions:
+        output.append({
+            "id": int(s.session_id),
+            "title": s.title,
+            "messages": json.loads(s.messages) # Convert JSON string back to list
+        })
+    return jsonify(output), 200
+
+@app.route('/delete-session/<session_id>', methods=['DELETE'])
+@jwt_required()
+def delete_cloud_session(session_id):
+    current_user_id = get_jwt_identity()
+    chat_session = ChatSession.query.filter_by(user_id=int(current_user_id), session_id=str(session_id)).first()
+    if chat_session:
+        db.session.delete(chat_session)
+        db.session.commit()
+    return jsonify({"message": "Deleted from cloud"}), 200
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
