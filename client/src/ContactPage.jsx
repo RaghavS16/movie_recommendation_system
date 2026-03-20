@@ -1,10 +1,8 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Mail, Send, CheckCircle, AlertCircle } from 'lucide-react';
 import { COLORS, FONTS } from './theme';
 
-// ── EmailJS credentials — loaded from .env (REACT_APP_ prefix required) ───
 const EMAILJS_SERVICE_ID  = process.env.REACT_APP_EMAILJS_SERVICE_ID;
 const EMAILJS_TEMPLATE_ID = process.env.REACT_APP_EMAILJS_TEMPLATE_ID;
 const EMAILJS_PUBLIC_KEY  = process.env.REACT_APP_EMAILJS_PUBLIC_KEY;
@@ -76,7 +74,7 @@ export default function ContactPage() {
       setError(
         'EmailJS is not configured yet. ' +
         'Please follow the setup steps in ContactPage.jsx comments, ' +
-        'or email directly: 2023242015@student.annauniv.edu'
+        'or email directly: raghav17radha@gmail.com'
       );
       setSending(false);
       return;
