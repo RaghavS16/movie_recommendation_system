@@ -1,7 +1,6 @@
 # server/app.py
 import os
 import json
-import secrets
 import random
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, send_from_directory
@@ -13,11 +12,15 @@ from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 
-# Import updated functions
 from tmdb_client import (
-    search_movie, discover_movies, get_extended_details, 
-    detect_mood, detect_language, get_watch_providers, detect_count,
-    get_trailer_key, get_recommendations, extract_year
+    search_movie, discover_movies, get_extended_details,
+    get_watch_providers, get_trailer_key, get_recommendations,
+    LANGUAGE_MAP, MOOD_GENRE_LABEL,
+)
+from ai_processor import analyze_message, get_persona_response
+from movie_search import (
+    smart_movie_search, did_you_mean,
+    get_movies_by_actor, get_movies_by_director, find_movie_by_song,
 )
 
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
@@ -25,69 +28,69 @@ load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
 app = Flask(__name__)
 CORS(app)
 
-basedir = os.path.abspath(os.path.dirname(__file__))
+basedir     = os.path.abspath(os.path.dirname(__file__))
 UPLOAD_FOLDER = os.path.join(basedir, 'static', 'uploads')
-os.makedirs(UPLOAD_FOLDER, exist_ok=True) 
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'filmobot.db')
+app.config['SQLALCHEMY_DATABASE_URI']    = 'sqlite:///' + os.path.join(basedir, 'filmobot.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['JWT_SECRET_KEY'] = os.getenv('SECRET_KEY', 'default-key')
-app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False
-app.config['MAIL_SERVER'] = 'smtp.gmail.com'
-app.config['MAIL_PORT'] = 587
-app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
-app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
-app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_USERNAME')
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['JWT_SECRET_KEY']             = os.getenv('SECRET_KEY', 'default-key')
+app.config['JWT_ACCESS_TOKEN_EXPIRES']   = False
+app.config['MAIL_SERVER']                = 'smtp.gmail.com'
+app.config['MAIL_PORT']                  = 587
+app.config['MAIL_USE_TLS']               = True
+app.config['MAIL_USERNAME']              = os.getenv('MAIL_USERNAME')
+app.config['MAIL_PASSWORD']              = os.getenv('MAIL_PASSWORD')
+app.config['MAIL_DEFAULT_SENDER']        = ('FilmoBot', os.getenv('MAIL_USERNAME'))
+app.config['UPLOAD_FOLDER']             = UPLOAD_FOLDER
 
-db = SQLAlchemy(app)
+db     = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
-jwt = JWTManager(app)
-mail = Mail(app)
+jwt    = JWTManager(app)
+mail   = Mail(app)
 
-# --- MODELS ---
+# ─── MODELS ───────────────────────────────────────────────────────────────────
 
 class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    email = db.Column(db.String(120), unique=True, nullable=False)
+    id            = db.Column(db.Integer, primary_key=True)
+    username      = db.Column(db.String(80),  unique=True, nullable=False)
+    email         = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(128), nullable=False)
     profile_image = db.Column(db.String(120), default=None)
-    reset_token = db.Column(db.String(100), nullable=True)
-    token_expiry = db.Column(db.DateTime, nullable=True)
-    
-    # MEMORY CONTEXT
-    last_mood = db.Column(db.String(50), nullable=True)
-    last_language = db.Column(db.String(10), nullable=True)
-    last_page = db.Column(db.Integer, default=1) # <--- NEW: Pagination Memory
+    reset_token   = db.Column(db.String(100), nullable=True)
+    token_expiry  = db.Column(db.DateTime,    nullable=True)
+    last_mood     = db.Column(db.String(50),  nullable=True)
+    last_language = db.Column(db.String(10),  nullable=True)
+    last_page     = db.Column(db.Integer,     default=1)
 
 class Watchlist(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    movie_id = db.Column(db.String(20), nullable=False)
-    title = db.Column(db.String(200), nullable=False)
-    poster_url = db.Column(db.String(500))
-    overview = db.Column(db.Text)
-    imdb_rating = db.Column(db.String(10))
-    director = db.Column(db.String(100))
-    duration = db.Column(db.String(50))
-    cast = db.Column(db.String(500))
-    where_to_watch = db.Column(db.String(500))
-    trailer_key = db.Column(db.String(50))
-    added_on = db.Column(db.DateTime, default=datetime.utcnow)
+    id            = db.Column(db.Integer, primary_key=True)
+    user_id       = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    movie_id      = db.Column(db.String(20),  nullable=False)
+    title         = db.Column(db.String(200), nullable=False)
+    poster_url    = db.Column(db.String(500))
+    overview      = db.Column(db.Text)
+    imdb_rating   = db.Column(db.String(10))
+    director      = db.Column(db.String(100))
+    duration      = db.Column(db.String(50))
+    cast          = db.Column(db.String(500))
+    where_to_watch= db.Column(db.String(500))
+    trailer_key   = db.Column(db.String(50))
+    added_on      = db.Column(db.DateTime, default=datetime.utcnow)
 
 class ChatSession(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    session_id = db.Column(db.String(50), nullable=False) # Links to frontend's Date.now() ID
-    title = db.Column(db.String(100), nullable=False)
-    messages = db.Column(db.Text, nullable=False) # Stores the messages array as a JSON string
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
-# --- ROUTES ---
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    session_id = db.Column(db.String(50),  nullable=False)
+    title      = db.Column(db.String(100), nullable=False)
+    messages   = db.Column(db.Text,        nullable=False)
+    updated_at = db.Column(db.DateTime,    default=datetime.utcnow)
+
+# ─── AUTH ROUTES ──────────────────────────────────────────────────────────────
 
 @app.route('/')
-def home(): return "FilmoBot API Running"
+def home():
+    return "FilmoBot API Running"
 
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
@@ -96,22 +99,23 @@ def uploaded_file(filename):
 @app.route('/register', methods=['POST'])
 def register():
     username = request.form.get('username')
-    email = request.form.get('email')
+    email    = request.form.get('email')
     password = request.form.get('password')
-    file = request.files.get('profileImage')
+    file     = request.files.get('profileImage')
 
     if User.query.filter_by(email=email).first():
         return jsonify({"message": "Email already registered"}), 400
-    
+
     filename = None
     if file:
-        filename = secure_filename(file.filename)
-        filename = f"{datetime.now().timestamp()}_{filename}"
+        filename = f"{datetime.now().timestamp()}_{secure_filename(file.filename)}"
         file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
 
-    hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
-    new_user = User(username=username, email=email, password_hash=hashed_password, profile_image=filename)
-    
+    new_user = User(
+        username=username, email=email,
+        password_hash=bcrypt.generate_password_hash(password).decode('utf-8'),
+        profile_image=filename,
+    )
     db.session.add(new_user)
     db.session.commit()
     return jsonify({"message": "User registered successfully!"}), 201
@@ -121,261 +125,303 @@ def login():
     data = request.get_json()
     user = User.query.filter_by(email=data['email']).first()
     if user and bcrypt.check_password_hash(user.password_hash, data['password']):
-        access_token = create_access_token(identity=str(user.id))
+        token     = create_access_token(identity=str(user.id))
         image_url = f"http://localhost:5000/uploads/{user.profile_image}" if user.profile_image else None
         return jsonify({
-            "access_token": access_token, 
-            "username": user.username,
-            "email": user.email, 
-            "profile_image": image_url 
+            "access_token":  token,
+            "username":      user.username,
+            "email":         user.email,
+            "profile_image": image_url,
         }), 200
     return jsonify({"message": "Invalid credentials"}), 401
 
-
-# In server/app.py
-
-# --- NEW HELPER FOR HUMAN-LIKE REPLIES ---
-def get_persona_response(mood, lang_name, count):
-    """Generates a friendly, empathetic response based on mood."""
-    
-    # 1. Empathetic Intros
-    intros = {
-        "happy": ["That's awesome! Let's keep the good vibes rolling. 😎", "Glad to hear that! Here are some movies to match your energy."],
-        "sad": ["I'm sorry you're feeling down. 🌧️ Sometimes a good movie helps let it all out.", "Sending you a virtual hug. 🫂 Here are some touching movies for you."],
-        "excited": ["Love the energy! 🚀 Let's get your adrenaline pumping with these picks.", "Let's go! Here are some high-octane movies for you."],
-        "scared": ["Ooh, brave choice! 👻 Don't watch these alone...", "Turning off the lights? Here are some spooky picks."],
-        "relaxing": ["It sounds like you've had a long day. 😴 Let's help you unwind.", "Time to kick back and chill. 🍵 Here are some feel-good movies."],
-        "funny": ["Ready to laugh? 😂 I've picked some hilarious ones for you.", "Laughter is the best medicine! Check these out."],
-        "romantic": ["Love is in the air! ❤️ Here are some romantic picks.", "Aww, perfect for a date night (or a self-love night!)."],
-        "thrilling": ["On the edge of your seat? 🕵️‍♀️ Let's solve some mysteries.", "Get ready for some twists and turns!"],
-        "bored": ["Let's cure that boredom with something totally different. 🎲", "I've got just the thing to spark your interest."]
-    }
-
-    # Select Intro
-    intro = random.choice(intros.get(mood, ["Here are some great movies for you."]))
-    
-    # Add Language Context
-    lang_str = f" in {lang_name}" if lang_name else ""
-    
-    return f"{intro} Here are {count} highly-rated movies{lang_str}:"
-
-# server/app.py
+# ─── CHAT ─────────────────────────────────────────────────────────────────────
 
 @app.route('/chat', methods=['POST'])
 @jwt_required()
 def chat():
     current_user_id = get_jwt_identity()
     user = db.session.get(User, int(current_user_id))
-    
-    data = request.get_json()
+
+    data       = request.get_json()
     user_input = data.get('message', '').strip()
-    
-    # 0. SPECIAL HANDLERS
-    
-    # Handle "More Like This"
+    if not user_input:
+        return jsonify({"bot_response": "Please type something!", "movies": []})
+
+    # ── 0. HARD-CODED SPECIAL COMMANDS ────────────────────────────────────────
+
     if user_input.startswith("recommend_id:"):
-        ref_movie_id = user_input.split(":")[1]
-        results = get_recommendations(ref_movie_id, mood=user.last_mood)
-        bot_response = f"Here are some similar movies:"
-        return process_and_return(results, bot_response, 5, sort=False)
+        ref_id  = user_input.split(":")[1]
+        results = get_recommendations(ref_id, mood=user.last_mood)
+        return process_and_return(results, "Movies you'll love:", 5, sort=False)
 
-    # Handle Greetings
-    greetings = ["hi", "hello", "hey", "hola"]
-    if user_input.lower() in greetings:
-        return jsonify({"bot_response": "Hello! I'm FilmoBot. 🎬 Tell me what you're in the mood for.", "movies": []})
+    if user_input.lower().strip("!?.") in {"hi","hello","hey","hola","sup","yo","howdy"}:
+        return jsonify({
+            "bot_response": (
+                "Hey! I'm FilmoBot 🎬 — tell me:\n"
+                "• How you feel: \"I'm tired after work, suggest something chill\"\n"
+                "• A movie name: \"Tell me about Mersal\"\n"
+                "• Actor/Director: \"Vijay top movies\" or \"Shankar films\"\n"
+                "• A song: \"I know song Aura 10/10, which movie?\"\n"
+                "• Similar films: \"Movies like Interstellar\""
+            ),
+            "movies": []
+        })
 
-    # Handle Reset
-    if "reset" in user_input.lower() or "clear" in user_input.lower():
-        user.last_mood = None
-        user.last_language = None
+    if any(w in user_input.lower() for w in ["reset","clear","start over","forget"]):
+        user.last_mood = user.last_language = None
         user.last_page = 1
         db.session.commit()
-        return jsonify({"bot_response": "Memory wiped! 🧹 What do you want to watch?", "movies": []})
+        return jsonify({"bot_response": "Memory cleared! 🧹 What would you like to watch?", "movies": []})
 
-    # 1. ANALYZE INPUT
-    new_mood = detect_mood(user_input)
-    new_code, new_lang_name = detect_language(user_input)
-    year = extract_year(user_input)
-    count = detect_count(user_input)
-    
-    # Keywords that imply the user wants a LIST of recommendations
-    discovery_keywords = ["suggest", "recommend", "show", "movie", "film", "best", "top", "find", "want", "more", "page"]
-    
-    # Check if user input implies Discovery
-    has_discovery_keywords = any(word in user_input.lower() for word in discovery_keywords)
-    wants_more = any(w in user_input.lower() for w in ["more", "next", "page"])
-    
-    # 2. DETERMINE INTENT (The Fix)
-    # We only use Discovery Mode if the user EXPLICITLY asks for a genre, language, year, or uses keywords.
-    # Otherwise, we assume they typed a specific Movie Title.
-    year_wants_discovery = year and has_discovery_keywords
+    # ── 1. ANALYSE ────────────────────────────────────────────────────────────
 
-    is_discovery_intent = (new_mood or new_code or year_wants_discovery or wants_more or has_discovery_keywords)
-    # 3. UPDATE MEMORY (Only if it's a discovery request)
-    if is_discovery_intent:
-        if new_mood or new_code or year:
-            user.last_page = 1 # Reset page on new topic
-            if new_mood: user.last_mood = new_mood
-            if new_code: user.last_language = new_code
+    analysis, raw_input = analyze_message(user_input)
+
+    intent       = analysis.get("intent", "discover")
+    mood         = analysis.get("mood")
+    language     = analysis.get("language")
+    year         = analysis.get("year")
+    # Frontend can override count via settings (movieCount preference)
+    frontend_count = data.get('count')  # sent by ChatPage from user settings
+    ai_count       = analysis.get('count') or 5
+    count          = max(1, min(int(frontend_count or ai_count), 10))
+    search_query = (analysis.get("search_query") or "").strip()
+    person_query = (analysis.get("person_query") or "").strip()
+    song_query   = (analysis.get("song_query")   or "").strip()
+    reason       = analysis.get("reason", "")
+
+    lang_code  = LANGUAGE_MAP.get(language) if language else None
+    wants_more = any(w in user_input.lower() for w in ["more","next","show more","another","page"])
+
+    # ── 2. UPDATE MEMORY ──────────────────────────────────────────────────────
+    # Rule: any new context (mood/language/year) = FULL RESET of old context.
+    # "More/next" = same context, next page.
+    # Actor/Director/Song searches wipe mood context so they don't bleed.
+
+    if intent in ("discover", "similar"):
+        if mood or lang_code or year:          # fresh context
+            user.last_mood     = mood
+            user.last_language = lang_code
+            user.last_page     = 1
         elif wants_more:
             user.last_page = (user.last_page or 1) + 1
         db.session.commit()
 
-    # 4. EXECUTE LOGIC
-    results = []
+    # Read back from DB (reflects the update above)
+    final_mood = user.last_mood
+    final_lang = user.last_language
+    final_page = user.last_page or 1
+
+    results      = []
     bot_response = ""
 
-    if is_discovery_intent:
-        # --- DISCOVERY MODE (Uses Memory) ---
-        final_mood = user.last_mood
-        final_lang = user.last_language
-        current_page = user.last_page
-        
-        print(f"🔍 DISCOVER: Mood={final_mood}, Lang={final_lang}, Year={year}, Page={current_page}")
-        results = discover_movies(mood=final_mood, language_code=final_lang, year=year, page=current_page)
-        
-        if not results and current_page > 1:
-            return jsonify({"bot_response": "That's all the movies I could find for this category!", "movies": []})
-            
-        # Personalized Response
-        mood_str = final_mood if final_mood else "popular"
-        bot_response = get_persona_response(final_mood, final_lang, count) if final_mood else f"Here are {count} {mood_str} movies:"
+    # ── 3. EXECUTE INTENT ─────────────────────────────────────────────────────
 
-    else:
-        # --- SEARCH MODE (Specific Title) ---
-        # Ignore memory, search exactly what the user typed
-        print(f"🔎 SEARCH: '{user_input}'")
-        user.last_mood = None 
+    # ── ACTOR / PERSON ────────────────────────────────────────────────────────
+    if intent == "person_search" and person_query:
+        # Try actor first, then director
+        movies, real_name = get_movies_by_actor(person_query, limit=count)
+        role = "actor"
+        if not movies:
+            movies, real_name = get_movies_by_director(person_query, limit=count)
+            role = "director"
+        if movies:
+            results      = movies
+            label        = "top movies featuring" if role == "actor" else "best films by"
+            bot_response = f"🎬 Here are the {label} **{real_name}**, ranked by rating:"
+            user.last_mood = user.last_language = None
+            db.session.commit()
+        else:
+            return jsonify({
+                "bot_response": (
+                    f"Couldn't find **'{person_query}'** in the database.\n"
+                    "Try using their full name, e.g. 'Thalapathy Vijay' or 'S. Shankar'."
+                ),
+                "movies": []
+            })
+
+    # ── SONG SEARCH ───────────────────────────────────────────────────────────
+    elif intent == "song_search" and song_query:
+        results = find_movie_by_song(song_query, limit=max(count, 3))
+        if results:
+            bot_response = (
+                f"🎵 The song **\"{song_query}\"** is likely from one of these films.\n"
+                "Check the trailers to confirm!"
+            )
+        else:
+            # Fallback: treat song name as movie title
+            results = smart_movie_search(song_query, limit=3)
+            bot_response = (
+                f"Searched for song **\"{song_query}\"** — closest matches:"
+                if results else
+                f"Couldn't match **\"{song_query}\"** to a movie. "
+                "Try adding the artist name or a few more lyrics!"
+            )
+        if not results:
+            return jsonify({"bot_response": bot_response, "movies": []})
+        user.last_mood = user.last_language = None
         db.session.commit()
-        results = search_movie(user_input)
-        bot_response = f"Here are the top results for '{user_input}':"
 
-        # Fallback: If search fails, but we have memory, offer a suggestion
-        if not results and (user.last_mood or user.last_language):
-            bot_response = f"I couldn't find a movie named '{user_input}'. But based on your preferences, here are some recommendations:"
-            results = discover_movies(mood=user.last_mood, language_code=user.last_language)
+    # ── SPECIFIC MOVIE ────────────────────────────────────────────────────────
+    elif intent == "search":
+        query   = search_query or raw_input
+        results = smart_movie_search(query, limit=5)
+        if results:
+            hint         = did_you_mean(query, results)
+            top_title    = results[0].get('title', query)
+            bot_response = hint if hint else f"Here's what I found for **{top_title}**:"
+        else:
+            return jsonify({
+                "bot_response": (
+                    f"Couldn't find **'{query}'**. 🤔\n"
+                    "Check the spelling, or describe the movie's story and I'll find it!"
+                ),
+                "movies": []
+            })
+
+    # ── SIMILAR ───────────────────────────────────────────────────────────────
+    elif intent == "similar":
+        query = search_query or raw_input
+        ref   = smart_movie_search(query, limit=1)
+        if ref:
+            ref_title    = ref[0].get('title', query)
+            results      = get_recommendations(ref[0]['id'], mood=final_mood)
+            hint         = did_you_mean(query, ref)
+            bot_response = f"{hint}\n🎬 Similar to **{ref_title}**:" if hint else f"🎬 Similar to **{ref_title}**:"
+        else:
+            results      = discover_movies(mood=final_mood, language_code=final_lang)
+            bot_response = f"Couldn't find '{query}', but here are picks based on your taste:"
+
+    # ── DISCOVER ──────────────────────────────────────────────────────────────
+    else:
+        results = discover_movies(
+            mood=final_mood,
+            language_code=final_lang,
+            year=year,
+            page=final_page,
+        )
+        if not results and final_page > 1:
+            user.last_page = 1
+            db.session.commit()
+            results      = discover_movies(mood=final_mood, language_code=final_lang, year=year, page=1)
+            bot_response = "Reached the end! Starting from the top 🔄"
+        else:
+            if final_mood:
+                bot_response = get_persona_response(final_mood, language, count, reason)
+            else:
+                lang_str     = f" {language}" if language else ""
+                year_str     = f" from {year}" if year else ""
+                bot_response = f"Here are {count} top-rated{lang_str} films{year_str}:"
+
+    # ── 4. RETURN ─────────────────────────────────────────────────────────────
 
     if not results:
-        return jsonify({"bot_response": "I couldn't find anything matching that.", "movies": []})
+        lang_hint = f" in {language}" if language else ""
+        year_hint = f" from {year}" if year else ""
+        mood_hint = f" with a {final_mood} vibe" if final_mood else ""
+        return jsonify({
+            "bot_response": (
+                f"No movies found{mood_hint}{lang_hint}{year_hint}. 🤔\n\n"
+                "Try relaxing the filters — e.g. remove the year, or try a different language."
+            ),
+            "movies": []
+        })
 
-    # For specific search, show exactly what was found (usually 1 or 2 relevant matches)
-    # For discovery, show the requested count
-    limit = 5 if not is_discovery_intent else count
-    
-    return process_and_return(results, bot_response, limit, sort=True)
+    preserve_order = intent in ("person_search","song_search","similar")
+    return process_and_return(results, bot_response, count, sort=not preserve_order)
 
 def process_and_return(results, bot_response, count, sort=True):
-    """
-    Helper to fetch details and format response.
-    sort=True  -> Sorts movies by Rating (Default behavior).
-    sort=False -> Keeps original order (Good for 'Similar' movies).
-    """
+    limit = 10 if sort else count
     candidate_movies = []
-    
-    # Optimization: If not sorting, we only need to fetch details for 'count' movies.
-    # If sorting, we fetch 10 to find the best rated ones, then pick top 'count'.
-    limit = 10 if sort else count 
-    
-    for movie in results[:limit]: 
-        title = movie.get('title')
-        year = movie.get('release_date', '')[:4]
+
+    for movie in results[:limit]:
+        title   = movie.get('title')
+        year    = movie.get('release_date', '')[:4]
         details = get_extended_details(title, year)
-        
         candidate_movies.append({
-            "id": movie.get('id'),
-            "title": title,
-            "overview": movie.get('overview'),
+            "id":          movie.get('id'),
+            "title":       title,
+            "overview":    movie.get('overview'),
             "poster_path": movie.get('poster_path'),
             "tmdb_rating": movie.get('vote_average'),
             "imdb_rating": details['imdb_rating'],
-            "cast": details['cast'],
-            "director": details['director'],
-            "duration": details['duration'],
+            "cast":        details['cast'],
+            "director":    details['director'],
+            "duration":    details['duration'],
         })
 
-    # --- ONLY SORT IF REQUESTED ---
     if sort:
-        candidate_movies.sort(key=lambda m: float(m['imdb_rating']) if m['imdb_rating'] != 'N/A' else m['tmdb_rating'] or 0, reverse=True)
-    
+        candidate_movies.sort(
+            key=lambda m: float(m['imdb_rating']) if m['imdb_rating'] != 'N/A' else (m['tmdb_rating'] or 0),
+            reverse=True,
+        )
+
     final_movies = []
     for movie in candidate_movies[:count]:
         movie['where_to_watch'] = get_watch_providers(movie['id'], movie['title'])
-        movie['trailer_key'] = get_trailer_key(movie['id'])
+        movie['trailer_key']    = get_trailer_key(movie['id'])
         final_movies.append(movie)
 
     return jsonify({"bot_response": bot_response, "movies": final_movies})
+
+# ─── WATCHLIST ROUTES ─────────────────────────────────────────────────────────
+
 @app.route('/add-watchlist', methods=['POST'])
 @jwt_required()
 def add_watchlist():
     current_user_id = get_jwt_identity()
     data = request.get_json()
-    
     if not data.get('movie_id') or not data.get('title'):
         return jsonify({"message": "Missing movie data"}), 400
-        
-    existing_entry = Watchlist.query.filter_by(user_id=int(current_user_id), movie_id=str(data['movie_id'])).first()
-    if existing_entry:
+    if Watchlist.query.filter_by(user_id=int(current_user_id), movie_id=str(data['movie_id'])).first():
         return jsonify({"message": "Movie already in watchlist"}), 409
-        
-    new_entry = Watchlist(
-        user_id=int(current_user_id), 
-        movie_id=str(data['movie_id']), 
-        title=data['title'],
-        poster_url=data.get('poster_path'), 
-        overview=data.get('overview', 'No overview available'),
-        imdb_rating=data.get('imdb_rating', 'N/A'), 
-        director=data.get('director', 'N/A'),
-        duration=data.get('duration', 'N/A'), 
-        cast=data.get('cast', 'N/A'),
-        where_to_watch=data.get('where_to_watch', 'N/A'),
-        trailer_key=data.get('trailer_key', None) 
-    )
-    
-    db.session.add(new_entry)
+    db.session.add(Watchlist(
+        user_id=int(current_user_id), movie_id=str(data['movie_id']),
+        title=data['title'], poster_url=data.get('poster_path'),
+        overview=data.get('overview',''), imdb_rating=data.get('imdb_rating','N/A'),
+        director=data.get('director','N/A'), duration=data.get('duration','N/A'),
+        cast=data.get('cast','N/A'), where_to_watch=data.get('where_to_watch','N/A'),
+        trailer_key=data.get('trailer_key'),
+    ))
     db.session.commit()
     return jsonify({"message": "Movie added to watchlist!"}), 201
 
-# 3. Update '/watchlist' to SEND the key back to frontend
 @app.route('/watchlist', methods=['GET'])
 @jwt_required()
 def get_watchlist():
     current_user_id = get_jwt_identity()
-    saved_movies = Watchlist.query.filter_by(user_id=int(current_user_id)).all()
-    output = []
-    for movie in saved_movies:
-        output.append({
-            "id": movie.id, 
-            "movie_id": movie.movie_id, 
-            "title": movie.title,
-            "poster_path": movie.poster_url, 
-            "overview": movie.overview,
-            "imdb_rating": movie.imdb_rating, 
-            "director": movie.director,
-            "duration": movie.duration, 
-            "cast": movie.cast, 
-            "where_to_watch": movie.where_to_watch,
-            "trailer_key": movie.trailer_key 
-        })
-    return jsonify(output), 200
+    movies = Watchlist.query.filter_by(user_id=int(current_user_id)).all()
+    return jsonify([{
+        "id": m.id, "movie_id": m.movie_id, "title": m.title,
+        "poster_path": m.poster_url, "overview": m.overview,
+        "imdb_rating": m.imdb_rating, "director": m.director,
+        "duration": m.duration, "cast": m.cast,
+        "where_to_watch": m.where_to_watch, "trailer_key": m.trailer_key,
+    } for m in movies]), 200
 
 @app.route('/watchlist/<int:entry_id>', methods=['DELETE'])
 @jwt_required()
 def delete_watchlist(entry_id):
     current_user_id = get_jwt_identity()
     entry = Watchlist.query.filter_by(id=entry_id, user_id=int(current_user_id)).first()
-    if not entry: return jsonify({"message": "Entry not found"}), 404
+    if not entry:
+        return jsonify({"message": "Entry not found"}), 404
     db.session.delete(entry)
     db.session.commit()
     return jsonify({"message": "Movie removed"}), 200
 
+# ─── PASSWORD RESET ───────────────────────────────────────────────────────────
+
 @app.route('/request-reset', methods=['POST'])
 def request_reset():
-    data = request.get_json()
+    data  = request.get_json()
     email = data.get('email')
-    user = User.query.filter_by(email=email).first()
-    if not user: return jsonify({"message": "If email exists, OTP sent."}), 200
+    user  = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({"message": "If email exists, OTP sent."}), 200
     otp = str(random.randint(100000, 999999))
-    user.reset_token = otp
+    user.reset_token  = otp
     user.token_expiry = datetime.utcnow() + timedelta(minutes=10)
     db.session.commit()
     try:
@@ -383,107 +429,92 @@ def request_reset():
         msg.body = f"Your OTP is: {otp}\nExpires in 10 mins."
         mail.send(msg)
         return jsonify({"message": "OTP sent"}), 200
-    except: return jsonify({"message": "Error sending email"}), 500
+    except:
+        return jsonify({"message": "Error sending email"}), 500
 
 @app.route('/reset-password', methods=['POST'])
 def reset_password():
-    data = request.get_json()
-    email = data.get('email')
-    otp = data.get('otp')
+    data         = request.get_json()
+    email        = data.get('email')
+    otp          = data.get('otp')
     new_password = data.get('new_password')
-    user = User.query.filter_by(email=email).first()
+    user         = User.query.filter_by(email=email).first()
     if not user or user.reset_token != otp or user.token_expiry < datetime.utcnow():
         return jsonify({"message": "Invalid OTP"}), 400
     user.password_hash = bcrypt.generate_password_hash(new_password).decode('utf-8')
-    user.reset_token = None
-    user.token_expiry = None
+    user.reset_token   = None
+    user.token_expiry  = None
     db.session.commit()
     return jsonify({"message": "Password updated"}), 200
+
+# ─── PROFILE ──────────────────────────────────────────────────────────────────
 
 @app.route('/update-profile', methods=['PUT'])
 @jwt_required()
 def update_profile():
     current_user_id = get_jwt_identity()
-    user = db.session.get(User, int(current_user_id))
-    
-    # Handle Text Data
+    user     = db.session.get(User, int(current_user_id))
     username = request.form.get('username')
-    email = request.form.get('email')
-    
+    email    = request.form.get('email')
     if username: user.username = username
-    if email: user.email = email
-    
-    # Handle Image Upload
+    if email:    user.email    = email
     file = request.files.get('profileImage')
     if file:
-        filename = secure_filename(file.filename)
-        # Add timestamp to make filename unique
-        filename = f"{datetime.now().timestamp()}_{filename}"
+        filename        = f"{datetime.now().timestamp()}_{secure_filename(file.filename)}"
         file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
         user.profile_image = filename
-        
     db.session.commit()
-    
-    # Return full URL so frontend can display it
     image_url = f"http://localhost:5000/uploads/{user.profile_image}" if user.profile_image else None
-    
     return jsonify({
-        "message": "Profile updated!",
-        "username": user.username,
-        "email": user.email,
-        "profile_image": image_url
+        "message": "Profile updated!", "username": user.username,
+        "email": user.email, "profile_image": image_url,
     }), 200
+
+# ─── CHAT SESSIONS ────────────────────────────────────────────────────────────
 
 @app.route('/sync-session', methods=['POST'])
 @jwt_required()
 def sync_session():
     current_user_id = get_jwt_identity()
-    data = request.get_json()
-    
+    data       = request.get_json()
     session_id = str(data.get('id'))
-    title = data.get('title')
-    messages = json.dumps(data.get('messages', [])) # Convert list to JSON string
-    
-    # Check if session already exists for this user
-    chat_session = ChatSession.query.filter_by(user_id=int(current_user_id), session_id=session_id).first()
-    
-    if chat_session:
-        # Update existing session
-        chat_session.messages = messages
-        chat_session.updated_at = datetime.utcnow()
+    title      = data.get('title')
+    messages   = json.dumps(data.get('messages', []))
+    session    = ChatSession.query.filter_by(user_id=int(current_user_id), session_id=session_id).first()
+    if session:
+        session.messages   = messages
+        session.updated_at = datetime.utcnow()
     else:
-        # Create new session
-        chat_session = ChatSession(user_id=int(current_user_id), session_id=session_id, title=title, messages=messages)
-        db.session.add(chat_session)
-        
+        db.session.add(ChatSession(
+            user_id=int(current_user_id), session_id=session_id,
+            title=title, messages=messages,
+        ))
     db.session.commit()
-    return jsonify({"message": "Session synced to cloud"}), 200
+    return jsonify({"message": "Session synced"}), 200
 
 @app.route('/get-sessions', methods=['GET'])
 @jwt_required()
 def get_sessions():
     current_user_id = get_jwt_identity()
-    # Fetch all sessions for this user, newest first
     sessions = ChatSession.query.filter_by(user_id=int(current_user_id)).order_by(ChatSession.updated_at.desc()).all()
-    
-    output = []
-    for s in sessions:
-        output.append({
-            "id": int(s.session_id),
-            "title": s.title,
-            "messages": json.loads(s.messages) # Convert JSON string back to list
-        })
-    return jsonify(output), 200
+    return jsonify([{
+        "id":       int(s.session_id),
+        "title":    s.title,
+        "messages": json.loads(s.messages),
+    } for s in sessions]), 200
 
 @app.route('/delete-session/<session_id>', methods=['DELETE'])
 @jwt_required()
 def delete_cloud_session(session_id):
     current_user_id = get_jwt_identity()
-    chat_session = ChatSession.query.filter_by(user_id=int(current_user_id), session_id=str(session_id)).first()
-    if chat_session:
-        db.session.delete(chat_session)
+    session = ChatSession.query.filter_by(user_id=int(current_user_id), session_id=str(session_id)).first()
+    if session:
+        db.session.delete(session)
         db.session.commit()
-    return jsonify({"message": "Deleted from cloud"}), 200
+    return jsonify({"message": "Deleted"}), 200
+
+# ─── RUN ──────────────────────────────────────────────────────────────────────
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()

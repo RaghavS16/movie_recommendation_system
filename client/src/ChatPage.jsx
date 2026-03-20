@@ -1,273 +1,458 @@
 // src/ChatPage.jsx
-import React, { useState, useEffect, useRef } from 'react';
-import { Send, Trash2 } from 'lucide-react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Send, Trash2, Film } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import MovieCard from './MovieCard';
-import { COLORS } from './theme';
-import { API_BASE_URL } from "./config";
+import { COLORS, FONTS } from './theme';
+import { getSettings } from './SettingsPage';
+import { API_BASE_URL } from './config';
+
+const SUGGESTIONS = [
+  { label: '😌 Tired after work',  text: "I'm exhausted after a long day at office, suggest something relaxing" },
+  { label: '😂 Make me laugh',      text: 'I want something really funny' },
+  { label: '❤️ Romantic Tamil',     text: 'Tamil romantic movies' },
+  { label: '🔥 Action 2024',        text: 'Best action movies from 2024' },
+  { label: '👻 Scare me',           text: 'I want something scary and creepy' },
+  { label: '🧠 Mind-bending',       text: 'Suggest a mind-bending thriller' },
+  { label: '🎵 Know a song',        text: 'I know the song Kesariya, which movie?' },
+  { label: '🎬 Vijay movies',       text: 'Vijay top movies' },
+];
+
+const TypingDots = () => (
+  <div style={{ display: 'flex', gap: '5px', padding: '4px 2px', alignItems: 'center' }}>
+    {[0, 1, 2].map(i => (
+      <div key={i} style={{
+        width: '7px', height: '7px', borderRadius: '50%', background: '#f5c842',
+        animation: 'bounce 1.2s infinite ease-in-out',
+        animationDelay: `${i * 0.2}s`, opacity: 0.7,
+      }} />
+    ))}
+  </div>
+);
+
+const BotMessage = ({ content }) => (
+  <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', maxWidth: '75%' }}>
+    <div style={{
+      width: '32px', height: '32px', borderRadius: '10px', minWidth: '32px',
+      background: 'linear-gradient(135deg, #f5c842, #c9a227)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: '15px', boxShadow: '0 0 12px rgba(245,200,66,0.3)', flexShrink: 0,
+    }}>🎬</div>
+    <div style={{
+      background: '#0e0e1a', border: '1px solid rgba(255,255,255,0.07)',
+      borderRadius: '18px', borderTopLeftRadius: '4px',
+      padding: '14px 18px', color: '#f0eee8',
+      fontSize: '15px', lineHeight: '1.65', whiteSpace: 'pre-wrap',
+    }}>
+      {content}
+    </div>
+  </div>
+);
+
+const UserMessage = ({ content }) => (
+  <div style={{
+    background: 'linear-gradient(135deg, #f5c842, #c9a227)',
+    borderRadius: '18px', borderTopRightRadius: '4px',
+    padding: '14px 18px', color: '#0a0a14',
+    fontSize: '15px', lineHeight: '1.65', maxWidth: '70%', fontWeight: '500',
+    boxShadow: '0 4px 16px rgba(245,200,66,0.2)',
+  }}>
+    {content}
+  </div>
+);
+
+const DEFAULT_MSG = [{
+  type: 'bot',
+  content: "Hey! I'm FilmoBot 🎬\n\nJust tell me how you feel, name a movie, mention an actor, or type a song name — I'll find the perfect film!\n\nTry a suggestion below to get started ↓",
+}];
 
 export default function ChatPage({ watchlist, onToggleWatchlist }) {
-  const navigate = useNavigate();
-  const location = useLocation(); 
-  const messagesEndRef = useRef(null);
-  
-  const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const location = useLocation();
+  const endRef   = useRef(null);
+  const inputRef = useRef(null);
 
-  // Default messages
-  const defaultMsg = [{ type: 'bot', content: "Hello! I'm FilmoBot. 🎬 Ask me for a movie recommendation!" }];
-  const [messages, setMessages] = useState(defaultMsg);
+  const [messages,         setMessages]         = useState(DEFAULT_MSG);
+  const [input,            setInput]            = useState('');
+  const [loading,          setLoading]          = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState(null);
-
-  // Load Sessions from LocalStorage initially for speed
-  const [sessions, setSessions] = useState(() => {
-     const saved = localStorage.getItem("chat_sessions");
-     return saved ? JSON.parse(saved) : [];
+  const [showSuggestions,  setShowSuggestions]  = useState(true);
+  const [sessions,         setSessions]         = useState(() => {
+    try { return JSON.parse(localStorage.getItem('chat_sessions') || '[]'); }
+    catch { return []; }
   });
 
-  const scrollToBottom = () => { 
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); 
-  };
-  useEffect(scrollToBottom, [messages]);
+  // ── REFS that always hold the LATEST values ───────────────────────────────
+  // This is the core fix: sendMessage reads from these refs, not from the
+  // closure, so switching sessions mid-request doesn't cause stale writes.
+  const messagesRef         = useRef(messages);
+  const currentSessionIdRef = useRef(currentSessionId);
+  const sessionsRef         = useRef(sessions);
 
-  // --- NEW: FETCH SESSIONS FROM DATABASE ON LOAD ---
+  useEffect(() => { messagesRef.current         = messages;         }, [messages]);
+  useEffect(() => { currentSessionIdRef.current = currentSessionId; }, [currentSessionId]);
+  useEffect(() => { sessionsRef.current         = sessions;         }, [sessions]);
+
+  // ── Scroll to bottom ──────────────────────────────────────────────────────
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
+
+  // ── Load sessions from cloud on mount ─────────────────────────────────────
   useEffect(() => {
-    const fetchCloudSessions = async () => {
-        const token = localStorage.getItem("token");
-        if (!token) return;
-        try {
-            const res = await fetch(`${API_BASE_URL}/get-sessions`, {
-                headers: { "Authorization": `Bearer ${token}` }
-            });
-            if (res.ok) {
-                const cloudData = await res.json();
-                setSessions(cloudData); // Override local storage with real DB data
-                localStorage.setItem("chat_sessions", JSON.stringify(cloudData));
-            }
-        } catch (error) { console.error("Failed to load cloud sessions", error); }
-    };
-    fetchCloudSessions();
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    fetch(`${API_BASE_URL}/get-sessions`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data) {
+          setSessions(data);
+          localStorage.setItem('chat_sessions', JSON.stringify(data));
+        }
+      })
+      .catch(() => {});
   }, []);
 
-  // Save Sessions locally as backup
+  // ── Persist sessions locally ──────────────────────────────────────────────
   useEffect(() => {
-    localStorage.setItem("chat_sessions", JSON.stringify(sessions));
+    localStorage.setItem('chat_sessions', JSON.stringify(sessions));
   }, [sessions]);
 
-  // Check for incoming session from Profile/Watchlist
+  // ── Navigate from sidebar on another page ─────────────────────────────────
   useEffect(() => {
-      if (location.state && location.state.sessionId) {
-          const targetId = location.state.sessionId;
-          const session = sessions.find(s => s.id === targetId);
-          if (session) {
-              setCurrentSessionId(targetId);
-              setMessages(session.messages);
-              window.history.replaceState({}, document.title);
-          }
+    if (location.state?.sessionId) {
+      const s = sessions.find(s => s.id === location.state.sessionId);
+      if (s) {
+        setCurrentSessionId(s.id);
+        setMessages(s.messages);
+        setShowSuggestions(false);
       }
+      window.history.replaceState({}, document.title);
+    }
   }, [location.state, sessions]);
 
-  // --- NEW: HELPER TO SYNC TO DATABASE ---
-  const syncSessionToDB = async (sessionData) => {
-    const token = localStorage.getItem("token");
-    try {
-        await fetch(`${API_BASE_URL}/sync-session`, {
-            method: "POST",
-            headers: { 
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${token}`
-            },
-            body: JSON.stringify(sessionData)
-        });
-    } catch (error) { console.error("Sync failed", error); }
+  // ── Sync to DB ────────────────────────────────────────────────────────────
+  const syncToDB = (sessionData) => {
+    const token = localStorage.getItem('token');
+    fetch(`${API_BASE_URL}/sync-session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(sessionData),
+    }).catch(() => {});
   };
 
+  // ── Session controls ──────────────────────────────────────────────────────
   const handleNewChat = () => {
-     setCurrentSessionId(null);
-     setMessages(defaultMsg);
+    setCurrentSessionId(null);
+    setMessages(DEFAULT_MSG);
+    setShowSuggestions(true);
+    setTimeout(() => inputRef.current?.focus(), 100);
   };
 
-  const handleSelectSession = (sessionId) => {
-     const session = sessions.find(s => s.id === sessionId);
-     if (session) {
-        setCurrentSessionId(sessionId);
-        setMessages(session.messages);
-     }
-  };
-
-  // --- UPDATED: DELETE FROM DATABASE ---
-  const handleDeleteSession = async (sessionId) => {
-      if (window.confirm("Are you sure you want to delete this chat?")) {
-          // Update UI instantly
-          const updatedSessions = sessions.filter(s => s.id !== sessionId);
-          setSessions(updatedSessions);
-          if (currentSessionId === sessionId) handleNewChat();
-          
-          // Tell Database to delete it
-          const token = localStorage.getItem("token");
-          try {
-              await fetch(`${API_BASE_URL}/delete-session/${sessionId}`, {
-                  method: "DELETE",
-                  headers: { "Authorization": `Bearer ${token}` }
-              });
-          } catch (error) { console.error("Failed to delete from cloud", error); }
-      }
-  };
-
-  const sendMessage = async (text, isHiddenCommand = false) => {
-    if (!text.trim()) return;
-
-    let updatedMessages = [...messages];
-    if (!isHiddenCommand) {
-        updatedMessages.push({ type: 'user', content: text });
-        setMessages(updatedMessages);
+  const handleSelectSession = (id) => {
+    const s = sessions.find(s => s.id === id);
+    if (s) {
+      setCurrentSessionId(id);
+      setMessages(s.messages);
+      setShowSuggestions(false);
     }
-    
-    setIsLoading(true);
-    const token = localStorage.getItem("token");
+  };
+
+  const handleDeleteSession = (id) => {
+    if (!window.confirm('Delete this chat?')) return;
+    setSessions(p => p.filter(s => s.id !== id));
+    if (currentSessionId === id) handleNewChat();
+    const token = localStorage.getItem('token');
+    fetch(`${API_BASE_URL}/delete-session/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => {});
+  };
+
+  // ── SEND MESSAGE ──────────────────────────────────────────────────────────
+  // Always reads messagesRef / currentSessionIdRef / sessionsRef so the
+  // response is ALWAYS written to whichever session is active at the time
+  // the API call completes — not the session that was active when sent.
+  const sendMessage = useCallback(async (text, hidden = false) => {
+    if (!text.trim()) return;
+    setShowSuggestions(false);
+
+    // Snapshot the active session at send-time
+    const sessionIdAtSend = currentSessionIdRef.current;
+
+    // Build outgoing message list from the ref (always fresh)
+    let msgs = [...messagesRef.current];
+    if (!hidden) {
+      msgs.push({ type: 'user', content: text });
+      setMessages(msgs);
+    }
+
+    setLoading(true);
+    const token = localStorage.getItem('token');
 
     try {
-        const response = await fetch(`${API_BASE_URL}/chat`, {
-            method: "POST",
-            headers: { 
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${token}`
-            },
-            body: JSON.stringify({ message: text })
-        });
-        const data = await response.json();
+      const res  = await fetch(`${API_BASE_URL}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          message: text,
+          // inject user's preferred movie count from settings
+          count: parseInt(getSettings().movieCount, 10) || 5,
+        }),
+      });
+      const data = await res.json();
 
-        if (data.bot_response) {
-            updatedMessages.push({ type: 'bot', content: data.bot_response });
-        }
-        if (data.movies && data.movies.length > 0) {
-            data.movies.forEach(movie => {
-                updatedMessages.push({ type: 'bot', content: movie, isJson: true });
-            });
-        }
-        setMessages([...updatedMessages]);
+      // ── After the await, re-read the CURRENT active session from the ref.
+      // If the user switched sessions while waiting, activeId ≠ sessionIdAtSend.
+      // In that case we save the result to the original session silently
+      // (background update) but do NOT update the visible messages — so the
+      // user's current view is never disrupted.
+      const activeIdNow = currentSessionIdRef.current;
+      const responseIsForActiveSession = (activeIdNow === sessionIdAtSend);
 
-        // --- UPDATED: SAVE TO DATABASE ---
-        if (!isHiddenCommand) { 
-            if (currentSessionId) {
-                // Update existing
-                const existingTitle = sessions.find(s => s.id === currentSessionId)?.title || "Conversation";
-                const updatedSession = { id: currentSessionId, title: existingTitle, messages: updatedMessages };
-                
-                setSessions(prev => prev.map(s => s.id === currentSessionId ? updatedSession : s));
-                syncSessionToDB(updatedSession); // Save to cloud
-            } else {
-                // Create new
-                const newId = Date.now();
-                const newTitle = text.length > 20 ? text.substring(0, 20) + "..." : text;
-                const newSession = {
-                    id: newId,
-                    title: newTitle,
-                    messages: updatedMessages
-                };
-                
-                setSessions(prev => [newSession, ...prev]);
-                setCurrentSessionId(newId);
-                syncSessionToDB(newSession); // Save to cloud
-            }
+      // Build the final message list for the session that sent the request
+      if (data.bot_response) msgs.push({ type: 'bot', content: data.bot_response });
+      (data.movies || []).forEach(m => msgs.push({ type: 'bot', content: m, isJson: true }));
+
+      // Only update visible messages if user hasn't switched sessions
+      if (responseIsForActiveSession) {
+        setMessages([...msgs]);
+      }
+
+      // Always persist the result to the correct session
+      if (!hidden) {
+        if (sessionIdAtSend) {
+          // Update existing session
+          const ex    = sessionsRef.current.find(s => s.id === sessionIdAtSend);
+          const title = ex?.title || 'Chat';
+          const up    = { id: sessionIdAtSend, title, messages: msgs };
+          setSessions(p => p.map(s => s.id === sessionIdAtSend ? up : s));
+          syncToDB(up);
+        } else {
+          // New session — only create if still on same (new) chat
+          if (responseIsForActiveSession) {
+            const newId = Date.now();
+            const title = text.length > 24 ? text.slice(0, 24) + '…' : text;
+            const ns    = { id: newId, title, messages: msgs };
+            setSessions(p => [ns, ...p]);
+            setCurrentSessionId(newId);
+            syncToDB(ns);
+          }
         }
-    } catch (error) {
-        setMessages(prev => [...prev, { type: 'bot', content: "Sorry, I'm having trouble connecting to the server." }]);
+      }
+    } catch {
+      // Only show error if still on the same session
+      if (currentSessionIdRef.current === sessionIdAtSend) {
+        setMessages(p => [...p, {
+          type: 'bot',
+          content: "Sorry, I couldn't reach the server. Please try again!",
+        }]);
+      }
     } finally {
-        setIsLoading(false);
+      setLoading(false);
     }
-  };
+  }, []); // no deps — reads everything from refs
 
   const handleSend = (e) => {
     e.preventDefault();
+    if (!input.trim()) return;
     sendMessage(input);
-    setInput("");
-  };
-
-  const handleMoreLikeThis = (movieId) => {
-     sendMessage(`recommend_id:${movieId}`, true);
-  };
-
-  const clearCurrentView = () => {
-    if (window.confirm("Clear this screen? (History will be saved)")) {
-        setMessages(defaultMsg);
-        sendMessage("reset", true); 
-    }
+    setInput('');
   };
 
   return (
-    <div style={{ display: 'flex', height: '100vh', backgroundColor: COLORS.bg, fontFamily: "'Inter', sans-serif" }}>
-      
-      <Sidebar 
-         chatSessions={sessions}
-         activeSessionId={currentSessionId}
-         onSelectSession={handleSelectSession}
-         onNewChat={handleNewChat}
-         onDeleteSession={handleDeleteSession} 
+    <div style={{
+      display: 'flex', height: '100vh',
+      background: '#080810', fontFamily: "'DM Sans', sans-serif", overflow: 'hidden',
+    }}>
+      {/* Ambient glow */}
+      <div style={{
+        position: 'fixed', top: '10%', left: '40%',
+        width: '500px', height: '400px', pointerEvents: 'none', zIndex: 0,
+        background: 'radial-gradient(ellipse, rgba(245,200,66,0.03) 0%, transparent 70%)',
+      }} />
+
+      <Sidebar
+        chatSessions={sessions}
+        activeSessionId={currentSessionId}
+        onSelectSession={handleSelectSession}
+        onNewChat={handleNewChat}
+        onDeleteSession={handleDeleteSession}
       />
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', height: '100%' }}>
-        
-        <div style={{ flex: 1, overflowY: 'auto', padding: '24px', paddingBottom: '100px', position: 'relative' }}>
-          
-          <button 
-            onClick={clearCurrentView}
-            style={{
-                position: 'absolute', top: '20px', right: '30px',
-                backgroundColor: '#333', border: 'none', borderRadius: '50%',
-                width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: 'pointer', zIndex: 10, boxShadow: '0 2px 5px rgba(0,0,0,0.2)'
-            }}
-            title="Clear Screen"
-          >
-            <Trash2 size={20} color="#EF4444" />
-          </button>
+      <div style={{
+        flex: 1, display: 'flex', flexDirection: 'column',
+        position: 'relative', zIndex: 1, minWidth: 0,
+      }}>
 
-          {messages.map((msg, index) => (
-            <div key={index} style={{ display: 'flex', justifyContent: msg.type === 'user' ? 'flex-end' : 'flex-start', marginBottom: '20px' }}>
+        {/* ── TOP BAR ── */}
+        <div style={{
+          padding: '14px 20px', borderBottom: '1px solid rgba(255,255,255,0.07)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          background: 'rgba(8,8,16,0.9)', backdropFilter: 'blur(20px)', flexShrink: 0,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{
+              width: '36px', height: '36px', borderRadius: '10px',
+              background: 'linear-gradient(135deg, #f5c842, #c9a227)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px',
+            }}>🎬</div>
+            <div>
+              <div style={{
+                fontWeight: '700', fontSize: '16px', color: '#f0eee8',
+                fontFamily: "'Playfair Display', serif",
+              }}>FilmoBot</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: '#4ade80' }}>
+                <div style={{
+                  width: '6px', height: '6px', borderRadius: '50%',
+                  background: '#4ade80', boxShadow: '0 0 6px #4ade80',
+                }} />
+                Online
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (window.confirm('Clear this screen?')) {
+                setMessages(DEFAULT_MSG);
+                setShowSuggestions(true);
+                sendMessage('reset', true);
+              }
+            }}
+            style={{
+              background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.15)',
+              borderRadius: '10px', padding: '7px 14px', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: '6px',
+              color: '#f87171', fontSize: '13px', fontWeight: '500', fontFamily: 'inherit',
+            }}
+          >
+            <Trash2 size={14} /> Clear
+          </button>
+        </div>
+
+        {/* ── MESSAGES ── */}
+        <div
+          className="hide-scrollbar"
+          style={{ flex: 1, overflowY: 'auto', padding: '24px 20px 190px' }}
+        >
+          {messages.map((msg, i) => (
+            <div
+              key={i}
+              style={{
+                display: 'flex',
+                justifyContent: msg.type === 'user' ? 'flex-end' : 'flex-start',
+                marginBottom: '16px',
+                animation: 'fadeUp 0.3s ease',
+              }}
+            >
               {msg.isJson ? (
-                <MovieCard 
-                  data={msg.content} 
+                <MovieCard
+                  data={msg.content}
                   isLiked={watchlist.some(m => m.title === msg.content.title)}
                   onToggle={onToggleWatchlist}
-                  onMoreLikeThis={handleMoreLikeThis}
+                  onMoreLikeThis={id => sendMessage(`recommend_id:${id}`, true)}
                 />
+              ) : msg.type === 'user' ? (
+                <UserMessage content={msg.content} />
               ) : (
-                <div style={{ 
-                    maxWidth: '75%', padding: '16px 22px', borderRadius: '20px', 
-                    backgroundColor: msg.type === 'user' ? '#6366F1' : '#2A2A2A', 
-                    color: 'white', 
-                    borderTopRightRadius: msg.type === 'user' ? '4px' : '20px', 
-                    borderTopLeftRadius: msg.type === 'bot' ? '4px' : '20px', 
-                    fontSize: '18px', lineHeight: '1.6' 
-                }}>
-                  {msg.content}
-                </div>
+                <BotMessage content={msg.content} />
               )}
             </div>
           ))}
-          
-          {isLoading && <div style={{color: '#888', marginLeft: '20px'}}>FilmoBot is typing...</div>}
-          <div ref={messagesEndRef} />
+
+          {loading && (
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', marginBottom: '16px' }}>
+              <div style={{
+                width: '32px', height: '32px', borderRadius: '10px', minWidth: '32px',
+                background: 'linear-gradient(135deg, #f5c842, #c9a227)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '15px', flexShrink: 0,
+              }}>🎬</div>
+              <div style={{
+                background: '#0e0e1a', border: '1px solid rgba(255,255,255,0.07)',
+                borderRadius: '18px', borderTopLeftRadius: '4px', padding: '12px 16px',
+              }}>
+                <TypingDots />
+              </div>
+            </div>
+          )}
+          <div ref={endRef} />
         </div>
 
-        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '24px', backgroundColor: '#121212', borderTop: '1px solid #333', zIndex: 50 }}>
-          <form onSubmit={handleSend} style={{ display: 'flex', gap: '16px', maxWidth: '900px', margin: '0 auto' }}>
-            <input 
-                type="text" 
-                placeholder="Ask 'Action from 2024' or 'Show More'" 
-                value={input} 
-                onChange={(e) => setInput(e.target.value)} 
-                style={{ flex: 1, backgroundColor: '#1E1E1E', border: '1px solid #333', borderRadius: '16px', padding: '18px', color: 'white', outline: 'none', fontSize: '18px' }} 
+        {/* ── SUGGESTIONS ── */}
+        {showSuggestions && (
+          <div style={{
+            position: 'absolute', bottom: '95px', left: '20px', right: '20px',
+            display: 'flex', gap: '8px', flexWrap: 'wrap',
+          }}>
+            {SUGGESTIONS.map((s, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => { sendMessage(s.text); setInput(''); }}
+                style={{
+                  background: '#0e0e1a', border: '1px solid rgba(255,255,255,0.07)',
+                  borderRadius: '100px', padding: '7px 14px', color: '#7a7a9a',
+                  fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit',
+                  transition: 'all 0.2s', whiteSpace: 'nowrap',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(245,200,66,0.4)'; e.currentTarget.style.color = '#f5c842'; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)'; e.currentTarget.style.color = '#7a7a9a'; }}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* ── INPUT BAR ── */}
+        <div style={{
+          position: 'absolute', bottom: 0, left: 0, right: 0,
+          padding: '14px 20px',
+          background: 'linear-gradient(to top, rgba(8,8,16,1) 70%, transparent)',
+        }}>
+          <form onSubmit={handleSend} style={{
+            display: 'flex', gap: '10px', maxWidth: '860px', margin: '0 auto',
+            background: '#0e0e1a', border: '1px solid rgba(255,255,255,0.07)',
+            borderRadius: '18px', padding: '6px 6px 6px 16px',
+          }}>
+            <Film size={18} color="#4a4a6a" style={{ alignSelf: 'center', minWidth: 18, flexShrink: 0 }} />
+            <input
+              ref={inputRef}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              placeholder="Describe your mood, name a movie, or ask anything…"
+              style={{
+                flex: 1, background: 'transparent', border: 'none', outline: 'none',
+                color: '#f0eee8', fontSize: '15px', padding: '10px 0', fontFamily: 'inherit',
+              }}
             />
-            <button type="submit" disabled={isLoading} style={{ backgroundColor: '#6366F1', border: 'none', borderRadius: '16px', width: '64px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-                <Send size={28} color="white" />
+            <button
+              type="submit"
+              disabled={loading || !input.trim()}
+              style={{
+                background: (loading || !input.trim()) ? '#1a1a2e' : 'linear-gradient(135deg, #f5c842, #c9a227)',
+                border: 'none', borderRadius: '12px', width: '46px', height: '46px',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: (loading || !input.trim()) ? 'default' : 'pointer',
+                transition: 'all 0.2s', flexShrink: 0,
+              }}
+            >
+              <Send size={18} color={(loading || !input.trim()) ? '#4a4a6a' : '#0a0a14'} />
             </button>
           </form>
+          <p style={{ textAlign: 'center', color: '#4a4a6a', fontSize: '11px', marginTop: '6px' }}>
+            Try: "Tamil thriller 2023" · "Movies like Interstellar" · "Vijay top movies" · "Song Kesariya which movie"
+          </p>
         </div>
-
       </div>
+
+      <style>{`
+        @keyframes fadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes bounce { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-6px)} }
+        .hide-scrollbar::-webkit-scrollbar { display:none; }
+        .hide-scrollbar { -ms-overflow-style:none; scrollbar-width:none; }
+      `}</style>
     </div>
   );
 }

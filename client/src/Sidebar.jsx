@@ -1,215 +1,235 @@
 // src/Sidebar.jsx
 import React, { useState, useEffect, useRef } from 'react';
-import { User, List, LogOut, MessageSquare, MessageCircle, MoreVertical, Trash2 } from 'lucide-react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import logo from './assets/logo.png'; 
+import {
+  User, BookMarked, LogOut, PlusSquare,
+  MessageCircle, MoreVertical, Trash2,
+  Info, Settings, Mail,
+} from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { COLORS, FONTS } from './theme';
 
-export default function Sidebar({ 
-  chatSessions, // Removing default [] to detect if it's passed or not
-  activeSessionId,         
-  onSelectSession,         
-  onNewChat,
-  onDeleteSession 
-}) {
+export default function Sidebar({ chatSessions, activeSessionId, onSelectSession, onNewChat, onDeleteSession }) {
   const navigate = useNavigate();
-  const [isExpanded, setIsExpanded] = useState(false);
-  
-  // State to hold sessions if we are on Profile/Watchlist pages
+  const [expanded, setExpanded] = useState(false);
   const [localSessions, setLocalSessions] = useState([]);
-
-  // Load sessions from LocalStorage if they aren't passed via props
-  useEffect(() => {
-    if (!chatSessions) {
-        const saved = localStorage.getItem("chat_sessions");
-        if (saved) {
-            setLocalSessions(JSON.parse(saved));
-        }
-    }
-  }, [chatSessions]);
-
-  // Determine which sessions to show
-  // If chatSessions prop exists (ChatPage), use it. Otherwise use local state (Profile/Watchlist).
-  const displaySessions = chatSessions || localSessions;
-
-  // State to track which chat's menu is open
   const [openMenuId, setOpenMenuId] = useState(null);
   const menuRef = useRef(null);
 
-  // Close menu when clicking outside
   useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (menuRef.current && !menuRef.current.contains(event.target)) {
-        setOpenMenuId(null);
-      }
+    if (!chatSessions) {
+      const saved = localStorage.getItem('chat_sessions');
+      if (saved) setLocalSessions(JSON.parse(saved));
+    }
+  }, [chatSessions]);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setOpenMenuId(null);
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const handleNewChatClick = () => {
-    if (onNewChat) onNewChat();
-    else navigate('/chat');
+  const sessions = chatSessions || localSessions;
+
+  const handleNewChat = () => { if (onNewChat) onNewChat(); else navigate('/chat'); };
+
+  const handleSessionClick = (id) => {
+    if (onSelectSession) onSelectSession(id);
+    else navigate('/chat', { state: { sessionId: id } });
   };
 
-  // --- SMART CLICK HANDLER ---
-  const handleSessionClick = (sessionId) => {
-      if (onSelectSession) {
-          // If on ChatPage, just switch session
-          onSelectSession(sessionId);
-      } else {
-          // If on Profile/Watchlist, navigate to ChatPage and pass the ID
-          navigate('/chat', { state: { sessionId } });
-      }
-  };
-
-  // --- SMART DELETE HANDLER ---
-  const handleDeleteClick = (e, sessionId) => {
-    e.stopPropagation(); 
-    
-    if (window.confirm("Are you sure you want to delete this chat?")) {
-        if (onDeleteSession) {
-            // On ChatPage: Let parent handle it
-            onDeleteSession(sessionId);
-        } else {
-            // On Profile/Watchlist: Delete from LocalStorage manually
-            const updated = localSessions.filter(s => s.id !== sessionId);
-            setLocalSessions(updated);
-            localStorage.setItem("chat_sessions", JSON.stringify(updated));
-        }
+  const handleDelete = (e, id) => {
+    e.stopPropagation();
+    if (!window.confirm('Delete this chat?')) return;
+    if (onDeleteSession) {
+      onDeleteSession(id);
+    } else {
+      const updated = localSessions.filter(s => s.id !== id);
+      setLocalSessions(updated);
+      localStorage.setItem('chat_sessions', JSON.stringify(updated));
     }
     setOpenMenuId(null);
   };
 
   const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("username");
-    navigate('/login');
+    ['token','username','email','profileImage','chat_sessions'].forEach(k => localStorage.removeItem(k));
+    navigate('/welcome');
   };
 
-  const toggleMenu = (e, sessionId) => {
-    e.stopPropagation();
-    setOpenMenuId(openMenuId === sessionId ? null : sessionId);
-  };
-
-  const menuItems = [
-    { icon: <MessageSquare size={24} />, label: "New Chat", action: handleNewChatClick },
-    { icon: <User size={24} />, label: "Profile", action: () => navigate('/profile') },
-    { icon: <List size={24} />, label: "Watchlist", action: () => navigate('/watchlist') },
+  const navItems = [
+    { icon: PlusSquare,   label: 'New Chat',  action: handleNewChat },
+    { icon: User,         label: 'Profile',   action: () => navigate('/profile') },
+    { icon: BookMarked,   label: 'Watchlist', action: () => navigate('/watchlist') },
+    { icon: Settings,     label: 'Settings',  action: () => navigate('/settings') },
+    { icon: Info,         label: 'About',     action: () => navigate('/about') },
+    { icon: Mail,         label: 'Contact',   action: () => navigate('/contact') },
   ];
 
+  const W = expanded ? '260px' : '72px';
+
   return (
-    <div 
-      className="sidebar-container"
-      onMouseEnter={() => setIsExpanded(true)}
-      onMouseLeave={() => setIsExpanded(false)}
+    <div
+      onMouseEnter={() => setExpanded(true)}
+      onMouseLeave={() => { setExpanded(false); setOpenMenuId(null); }}
+      className="sidebar-root"
       style={{
-        width: isExpanded ? '260px' : '80px',
-        height: '100vh',
-        backgroundColor: '#0a0a0a',
-        borderRight: '1px solid #333',
-        display: 'flex', flexDirection: 'column', padding: '20px 10px',
-        boxSizing: 'border-box', transition: 'width 0.3s ease', overflow: 'hidden', position: 'relative', zIndex: 50
+        width: W, minWidth: W, height: '100vh',
+        background: COLORS.bgCard,
+        borderRight: `1px solid ${COLORS.border}`,
+        display: 'flex', flexDirection: 'column',
+        padding: '20px 10px', boxSizing: 'border-box',
+        transition: 'width 0.3s cubic-bezier(0.4,0,0.2,1), min-width 0.3s cubic-bezier(0.4,0,0.2,1)',
+        overflow: 'hidden', position: 'relative', zIndex: 50, flexShrink: 0,
+        fontFamily: FONTS.body,
       }}
     >
       {/* Logo */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '40px', paddingLeft: '8px', whiteSpace: 'nowrap' }}>
-        <img src={logo} alt="Logo" style={{ width: '32px', height: '32px', minWidth: '32px' }} />
-        <span style={{ color: 'white', fontWeight: 'bold', fontSize: '18px', opacity: isExpanded ? 1 : 0, transition: 'opacity 0.2s' }}>FilmoBot</span>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: '12px',
+        padding: '8px 8px 28px', whiteSpace: 'nowrap',
+      }}>
+        <div style={{
+          width: '36px', height: '36px', minWidth: '36px', borderRadius: '10px',
+          background: 'linear-gradient(135deg, #f5c842, #c9a227)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: '18px', boxShadow: '0 0 16px rgba(245,200,66,0.3)',
+        }}>🎬</div>
+        <span style={{
+          fontFamily: FONTS.display, fontWeight: '700', fontSize: '18px',
+          color: COLORS.textMain,
+          opacity: expanded ? 1 : 0, transition: 'opacity 0.2s',
+          whiteSpace: 'nowrap',
+        }}>FilmoBot</span>
       </div>
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'hidden' }}>
-        {/* Menu Items */}
-        <div>
-            {menuItems.map((item, index) => (
-            <div key={index} onClick={item.action} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '12px', color: '#9CA3AF', cursor: 'pointer', borderRadius: '12px', marginBottom: '8px', whiteSpace: 'nowrap' }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = '#2A2A2A'; e.currentTarget.style.color = 'white'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#9CA3AF'; }}
-            >
-                <div style={{ minWidth: '24px' }}>{item.icon}</div>
-                <span style={{ fontSize: '16px', fontWeight: '500', opacity: isExpanded ? 1 : 0, transition: 'opacity 0.2s' }}>{item.label}</span>
+      {/* Nav items */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        {navItems.map(({ icon: Icon, label, action }) => (
+          <button key={label} onClick={action} style={{
+            display: 'flex', alignItems: 'center', gap: '12px',
+            padding: '11px 10px', borderRadius: '12px', cursor: 'pointer',
+            background: 'transparent', border: 'none',
+            color: COLORS.textSub, whiteSpace: 'nowrap',
+            transition: 'all 0.2s', fontFamily: FONTS.body,
+          }}
+            onMouseEnter={e => { e.currentTarget.style.background = COLORS.bgElevated; e.currentTarget.style.color = '#f5c842'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = COLORS.textSub; }}
+          >
+            <div style={{ minWidth: '24px', display: 'flex', justifyContent: 'center' }}>
+              <Icon size={20} />
             </div>
-            ))}
-        </div>
+            <span style={{
+              fontSize: '14px', fontWeight: '500',
+              opacity: expanded ? 1 : 0, transition: 'opacity 0.15s',
+            }}>
+              {label}
+            </span>
+          </button>
+        ))}
+      </div>
 
-        {/* Chat History Section - ALWAYS VISIBLE if expanded */}
-        {isExpanded && displaySessions && displaySessions.length > 0 && (
-            <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', marginTop: '15px', borderTop: '1px solid #333', paddingTop: '15px', opacity: isExpanded ? 1 : 0, transition: 'opacity 0.3s' }}>
-                <div style={{ fontSize: '16px', color: '#666', fontWeight: 'bold', marginBottom: '10px', paddingLeft: '12px', textTransform: 'uppercase' }}>
-                    Recent Chats
+      {/* Divider */}
+      <div style={{ height: '1px', background: COLORS.border, margin: '12px 8px' }} />
+
+      {/* Chat history */}
+      {expanded && sessions && sessions.length > 0 && (
+        <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', paddingBottom: '8px' }}>
+          <p style={{
+            fontSize: '10px', fontWeight: '700', letterSpacing: '2px',
+            textTransform: 'uppercase', color: COLORS.textMuted,
+            padding: '0 10px 8px',
+          }}>
+            Recent
+          </p>
+          {sessions.map(session => (
+            <div key={session.id} style={{ position: 'relative' }}>
+              <div
+                onClick={() => handleSessionClick(session.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '9px 10px', borderRadius: '10px', cursor: 'pointer',
+                  background: activeSessionId === session.id ? COLORS.bgElevated : 'transparent',
+                  color: activeSessionId === session.id ? COLORS.textMain : COLORS.textSub,
+                  marginBottom: '2px',
+                  borderLeft: activeSessionId === session.id ? '2px solid #f5c842' : '2px solid transparent',
+                  transition: 'all 0.15s',
+                }}
+                onMouseEnter={e => { if (activeSessionId !== session.id) e.currentTarget.style.background = COLORS.bgElevated; }}
+                onMouseLeave={e => { if (activeSessionId !== session.id) e.currentTarget.style.background = 'transparent'; }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', minWidth: 0 }}>
+                  <MessageCircle size={14} style={{ minWidth: 14 }} />
+                  <span style={{ fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {session.title || 'Conversation'}
+                  </span>
                 </div>
-                
-                {displaySessions.map((session) => (
-                    <div
-                        key={session.id}
-                        onClick={() => handleSessionClick(session.id)} // Updated handler
-                        style={{
-                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                            padding: '10px 12px', borderRadius: '8px',
-                            backgroundColor: activeSessionId === session.id ? '#2A2A2A' : 'transparent',
-                            color: activeSessionId === session.id ? 'white' : '#888',
-                            cursor: 'pointer', fontSize: '16px',
-                            marginBottom: '4px', whiteSpace: 'nowrap', position: 'relative'
-                        }}
-                        onMouseEnter={(e) => { if(activeSessionId !== session.id) e.currentTarget.style.backgroundColor = '#1a1a1a'; }}
-                        onMouseLeave={(e) => { if(activeSessionId !== session.id) e.currentTarget.style.backgroundColor = 'transparent'; }}
-                    >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', overflow: 'hidden' }}>
-                            <div style={{ minWidth: '16px' }}><MessageCircle size={20} /></div>
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{session.title || "Conversation"}</span>
-                        </div>
+                <button
+                  onClick={e => { e.stopPropagation(); setOpenMenuId(openMenuId === session.id ? null : session.id); }}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: COLORS.textMuted, padding: '2px', borderRadius: '4px',
+                    display: 'flex', minWidth: 20,
+                  }}
+                >
+                  <MoreVertical size={14} />
+                </button>
+              </div>
 
-                        {/* Three-Dot Menu Button */}
-                        <div 
-                            onClick={(e) => toggleMenu(e, session.id)}
-                            style={{ padding: '4px', borderRadius: '4px', display: 'flex', alignItems: 'center' }}
-                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#333'}
-                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                        >
-                            <MoreVertical size={20} />
-                        </div>
-
-                        {/* Dropdown Menu */}
-                        {openMenuId === session.id && (
-                            <div 
-                                ref={menuRef}
-                                style={{
-                                    position: 'absolute', right: '10px', top: '35px',
-                                    backgroundColor: '#1E1E1E', border: '1px solid #333', borderRadius: '8px',
-                                    padding: '5px', zIndex: 100, boxShadow: '0 4px 6px rgba(0,0,0,0.5)'
-                                }}
-                            >
-                                <button
-                                    onClick={(e) => handleDeleteClick(e, session.id)} // Updated handler
-                                    style={{
-                                        display: 'flex', alignItems: 'center', gap: '8px',
-                                        background: 'transparent', border: 'none', color: '#EF4444',
-                                        padding: '8px 12px', width: '100%', cursor: 'pointer',
-                                        fontSize: '16px', borderRadius: '4px'
-                                    }}
-                                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.1)'}
-                                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                                >
-                                    <Trash2 size={16} /> Delete
-                                </button>
-                            </div>
-                        )}
-                    </div>
-                ))}
+              {openMenuId === session.id && (
+                <div ref={menuRef} style={{
+                  position: 'absolute', right: '8px', top: '36px',
+                  background: COLORS.bgElevated, border: `1px solid ${COLORS.border}`,
+                  borderRadius: '10px', padding: '4px', zIndex: 200,
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                }}>
+                  <button
+                    onClick={e => handleDelete(e, session.id)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '8px',
+                      background: 'transparent', border: 'none', color: '#f87171',
+                      padding: '8px 14px', cursor: 'pointer', fontSize: '13px',
+                      borderRadius: '7px', whiteSpace: 'nowrap', fontFamily: FONTS.body,
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <Trash2 size={14} /> Delete
+                  </button>
+                </div>
+              )}
             </div>
-        )}
-      </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ flex: expanded ? 0 : 1 }} />
 
       {/* Logout */}
-      <div onClick={handleLogout} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '12px', marginTop: 'auto', color: '#EF4444', cursor: 'pointer', borderRadius: '12px', whiteSpace: 'nowrap' }}
-        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)'}
-        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+      <button onClick={handleLogout} style={{
+        display: 'flex', alignItems: 'center', gap: '12px',
+        padding: '11px 10px', borderRadius: '12px', cursor: 'pointer',
+        background: 'transparent', border: 'none',
+        color: '#f87171', whiteSpace: 'nowrap',
+        transition: 'all 0.2s', fontFamily: FONTS.body,
+        marginTop: '8px',
+      }}
+        onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
+        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
       >
-        <div style={{ minWidth: '24px' }}><LogOut size={24} /></div>
-        <span style={{ opacity: isExpanded ? 1 : 0, transition: 'opacity 0.2s' }}>Log out</span>
-      </div>
-      
+        <div style={{ minWidth: '24px', display: 'flex', justifyContent: 'center' }}>
+          <LogOut size={20} />
+        </div>
+        <span style={{
+          fontSize: '14px', fontWeight: '500',
+          opacity: expanded ? 1 : 0, transition: 'opacity 0.15s',
+        }}>
+          Log out
+        </span>
+      </button>
+
       <style>{`
-        @media (max-width: 768px) { .sidebar-container { display: none !important; } }
+        @media (max-width: 640px) { .sidebar-root { display: none !important; } }
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>

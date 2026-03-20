@@ -1,208 +1,173 @@
 // src/Signup.jsx
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { ChevronLeft, Edit2 } from "lucide-react";
-import { COMMON_STYLES, COLORS } from "./theme";
-import { API_BASE_URL } from "./config";
+import React, { useState } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import { ChevronLeft, Eye, EyeOff, Mail, Lock, User, Camera } from 'lucide-react';
+import { COLORS, FONTS } from './theme';
+import { API_BASE_URL } from './config';
 
-// --- REUSED COMPONENT: FocusInput ---
-const FocusInput = ({ type, placeholder, value, onChange }) => {
-  const [isFocused, setIsFocused] = useState(false);
-
+const Field = ({ icon: Icon, type: initialType, placeholder, value, onChange }) => {
+  const [focused, setFocused] = useState(false);
+  const [showPw, setShowPw] = useState(false);
+  const isPassword = initialType === 'password';
+  const type = isPassword ? (showPw ? 'text' : 'password') : initialType;
   return (
     <div style={{
-      // Gradient only on focus
-      background: isFocused ? 'linear-gradient(to right, #6366F1, #8b5cf6)' : '#333',
-      padding: '2px',
-      borderRadius: '10px',
-      marginTop: '16px',
-      transition: 'background 0.3s ease'
+      borderRadius: '14px', padding: '2px',
+      background: focused ? 'linear-gradient(135deg, #f5c842, #c9a227)' : 'transparent',
+      border: focused ? 'none' : `1px solid ${COLORS.border}`,
+      transition: 'all 0.25s',
     }}>
-      <input
-        type={type}
-        placeholder={placeholder}
-        value={value}
-        onChange={onChange}
-        onFocus={() => setIsFocused(true)}
-        onBlur={() => setIsFocused(false)}
-        style={{
-          width: '100%',
-          backgroundColor: '#1E1E1E',
-          color: 'white',
-          padding: '20px 16px',
-          borderRadius: '8px',
-          outline: 'none',
-          border: 'none',
-          fontSize: '20px',
-          boxSizing: 'border-box'
-        }}
-        required
-      />
+      <div style={{
+        background: COLORS.bgElevated, borderRadius: '12px',
+        display: 'flex', alignItems: 'center', gap: '12px', padding: '0 16px',
+      }}>
+        <Icon size={18} color={focused ? '#f5c842' : COLORS.textMuted} style={{ minWidth: 18, transition: 'color 0.2s' }} />
+        <input
+          type={type} placeholder={placeholder} value={value} onChange={onChange}
+          onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+          style={{
+            flex: 1, background: 'transparent', border: 'none', outline: 'none',
+            color: COLORS.textMain, fontSize: '16px', padding: '18px 0',
+            fontFamily: FONTS.body,
+          }}
+        />
+        {isPassword && (
+          <button type="button" onClick={() => setShowPw(s => !s)} style={{
+            background: 'none', border: 'none', cursor: 'pointer', color: COLORS.textMuted, display: 'flex', padding: '4px',
+          }}>
+            {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        )}
+      </div>
     </div>
   );
 };
 
 export default function Signup() {
   const navigate = useNavigate();
-  const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  
-  const [profileImage, setProfileImage] = useState(null);
+  const [form, setForm] = useState({ username: '', email: '', password: '', confirm: '' });
   const [imageFile, setImageFile] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const handleProfileImageChange = (e) => {
+  const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const handleImage = (e) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setImageFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setProfileImage(reader.result);
-      };
-      reader.readAsDataURL(file);
-    }
+    if (!file) return;
+    setImageFile(file);
+    const reader = new FileReader();
+    reader.onloadend = () => setPreview(reader.result);
+    reader.readAsDataURL(file);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    // Password Validation
-    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*(),.?":{}|<>]).{8,}$/;
-    
-    if (!passwordRegex.test(password)) {
-        alert("Password must be at least 8 characters long and include an uppercase letter, a lowercase letter, a number, and a special character.");
-        return;
-    }
-
-    if (password !== confirmPassword) {
-      alert("Passwords do not match!");
+    const pwRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*(),.?":{}|<>]).{8,}$/;
+    if (!pwRegex.test(form.password)) {
+      setError('Password needs 8+ chars, uppercase, lowercase, number and special character.');
       return;
     }
-
+    if (form.password !== form.confirm) { setError('Passwords do not match.'); return; }
+    setLoading(true); setError('');
     try {
-      const formData = new FormData();
-      formData.append("username", username);
-      formData.append("email", email);
-      formData.append("password", password);
-      if (imageFile) {
-        formData.append("profileImage", imageFile);
-      }
-
-      const response = await fetch(`${API_BASE_URL}/register`, {
-        method: "POST",
-        body: formData,
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        alert("Registration successful! Please login.");
-        navigate("/login");
-      } else {
-        alert(data.message || "Registration failed");
-      }
-    } catch (error) {
-      console.error("Error:", error);
-      alert("Failed to connect to server.");
-    }
+      const fd = new FormData();
+      fd.append('username', form.username);
+      fd.append('email', form.email);
+      fd.append('password', form.password);
+      if (imageFile) fd.append('profileImage', imageFile);
+      const res = await fetch(`${API_BASE_URL}/register`, { method: 'POST', body: fd });
+      const data = await res.json();
+      if (res.ok) { alert('Account created! Please sign in.'); navigate('/login'); }
+      else setError(data.message || 'Registration failed');
+    } catch { setError('Failed to connect to server.'); }
+    finally { setLoading(false); }
   };
 
   return (
-    <div style={{...COMMON_STYLES.container, justifyContent: 'flex-start'}}>
-      
-      <button 
-        onClick={() => navigate(-1)} 
-        style={{...COMMON_STYLES.backBtn, color: 'white', marginBottom: '32px'}}
-        aria-label="Go back"
-      >
-        <ChevronLeft size={24} />
-      </button>
+    <div style={{
+      minHeight: '100vh', background: COLORS.bg,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontFamily: FONTS.body, padding: '32px 24px',
+    }}>
+      <div style={{ width: '100%', maxWidth: '460px' }}>
 
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
-        <div style={COMMON_STYLES.wrapper}>
-          
-          <div style={{ marginBottom: '32px' }}>
-            <h1 style={{ fontSize: '35px', fontWeight: 'bold', color: 'white', marginBottom: '8px' }}>
-              Finish up your profile!
-            </h1>
-            <p style={{ fontSize: '18px', color: COLORS.textSub }}>
-              Complete your profile before to jump in!
-            </p>
-          </div>
+        <button onClick={() => navigate(-1)} style={{
+          background: 'none', border: 'none', cursor: 'pointer',
+          color: COLORS.textSub, display: 'flex', alignItems: 'center',
+          gap: '6px', marginBottom: '36px', fontSize: '14px', padding: 0,
+        }}>
+          <ChevronLeft size={18} /> Back
+        </button>
 
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            
-            {/* Profile Picture Upload */}
-            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '8px' }}>
-              <div style={{ position: 'relative' }}>
-                <div style={{
-                  width: '110px', height: '110px', borderRadius: '50%',
-                  backgroundColor: '#2a2a2a', overflow: 'hidden',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center'
-                }}>
-                  {profileImage ? (
-                    <img src={profileImage} alt="Profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  ) : (
-                    <svg style={{ width: '48px', height: '48px', color: '#4b5563' }} fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
-                    </svg>
-                  )}
-                </div>
-                
-                <label
-                  htmlFor="profile-image"
-                  style={{
-                    position: 'absolute', bottom: 0, right: 0,
-                    background: COLORS.primaryGradient,
-                    padding: '8px', borderRadius: '50%',
-                    cursor: 'pointer', display: 'flex'
-                  }}
-                >
-                  <Edit2 size={16} color="white" />
-                  <input
-                    id="profile-image" type="file" accept="image/*"
-                    onChange={handleProfileImageChange}
-                    style={{ display: 'none' }}
-                  />
-                </label>
-              </div>
-            </div>
-
-            {/* Inputs with Focus Effect */}
-            <FocusInput 
-                type="text" 
-                placeholder="Username" 
-                value={username} 
-                onChange={e => setUsername(e.target.value)} 
-            />
-            
-            <FocusInput 
-                type="email" 
-                placeholder="Email" 
-                value={email} 
-                onChange={e => setEmail(e.target.value)} 
-            />
-            
-            <FocusInput 
-                type="password" 
-                placeholder="Password" 
-                value={password} 
-                onChange={e => setPassword(e.target.value)} 
-            />
-            
-            <FocusInput 
-                type="password" 
-                placeholder="Confirm Password" 
-                value={confirmPassword} 
-                onChange={e => setConfirmPassword(e.target.value)} 
-            />
-
-            <button type="submit" style={COMMON_STYLES.buttonPrimary}>
-              Submit
-            </button>
-          </form>
+        <div style={{ marginBottom: '32px' }}>
+          <p style={{ color: '#f5c842', fontSize: '12px', letterSpacing: '3px', textTransform: 'uppercase', marginBottom: '8px' }}>
+            Join FilmoBot
+          </p>
+          <h1 style={{
+            fontFamily: FONTS.display, fontSize: '36px', fontWeight: '900',
+            color: COLORS.textMain, marginBottom: '8px',
+          }}>Create Account</h1>
+          <p style={{ color: COLORS.textSub, fontSize: '15px' }}>
+            Already have an account?{' '}
+            <Link to="/login" style={{ color: '#f5c842', textDecoration: 'none', fontWeight: '600' }}>Sign in</Link>
+          </p>
         </div>
+
+        {/* Avatar upload */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '28px' }}>
+          <label style={{ cursor: 'pointer', position: 'relative' }}>
+            <div style={{
+              width: '90px', height: '90px', borderRadius: '50%',
+              background: COLORS.bgElevated,
+              border: `2px dashed ${COLORS.border}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              overflow: 'hidden', transition: 'border-color 0.2s',
+            }}>
+              {preview
+                ? <img src={preview} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                : <User size={32} color={COLORS.textMuted} />
+              }
+            </div>
+            <div style={{
+              position: 'absolute', bottom: 0, right: 0,
+              background: 'linear-gradient(135deg, #f5c842, #c9a227)',
+              borderRadius: '50%', width: '28px', height: '28px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Camera size={14} color="#0a0a14" />
+            </div>
+            <input type="file" accept="image/*" onChange={handleImage} style={{ display: 'none' }} />
+          </label>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <Field icon={User}  type="text"     placeholder="Username"         value={form.username} onChange={set('username')} />
+          <Field icon={Mail}  type="email"    placeholder="Email address"    value={form.email}    onChange={set('email')} />
+          <Field icon={Lock}  type="password" placeholder="Password"         value={form.password} onChange={set('password')} />
+          <Field icon={Lock}  type="password" placeholder="Confirm password" value={form.confirm}  onChange={set('confirm')} />
+
+          {error && (
+            <div style={{
+              background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+              borderRadius: '10px', padding: '12px 16px', color: '#f87171', fontSize: '14px',
+            }}>
+              {error}
+            </div>
+          )}
+
+          <button type="submit" disabled={loading} style={{
+            background: loading ? '#333' : 'linear-gradient(135deg, #f5c842, #c9a227)',
+            color: loading ? COLORS.textSub : '#0a0a14',
+            border: 'none', borderRadius: '14px', padding: '18px',
+            fontSize: '16px', fontWeight: '700', cursor: loading ? 'default' : 'pointer',
+            fontFamily: FONTS.body, marginTop: '8px',
+            boxShadow: loading ? 'none' : '0 0 30px rgba(245,200,66,0.2)',
+          }}>
+            {loading ? 'Creating account…' : 'Create Account →'}
+          </button>
+        </form>
       </div>
     </div>
   );
