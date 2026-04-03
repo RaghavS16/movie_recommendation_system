@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { COLORS, FONTS } from './theme';
+import filmoLogo from './assets/filmobot-logo.svg';
 import { Sparkles, Search, Heart, Zap, Film, Star, ChevronDown } from 'lucide-react';
 
 const FEATURES = [
@@ -37,7 +38,7 @@ export default function Welcome() {
         borderBottom: '1px solid rgba(255,255,255,0.05)',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '24px' }}>🎬</span>
+          <img src={filmoLogo} alt="FilmoBot" style={{ width: '32px', height: '32px' }} />
           <span style={{ fontFamily: FONTS.display, fontSize: '22px', fontWeight: '700', color: COLORS.textMain }}>
             FilmoBot
           </span>
@@ -265,7 +266,7 @@ export default function Welcome() {
         gap: '16px', maxWidth: '1000px', margin: '0 auto',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '20px' }}>🎬</span>
+          <img src={filmoLogo} alt="FilmoBot" style={{ width: '24px', height: '24px' }} />
           <span style={{ fontFamily: FONTS.display, fontWeight: '700', color: COLORS.textMain }}>FilmoBot</span>
         </div>
         <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>

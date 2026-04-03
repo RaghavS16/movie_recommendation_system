@@ -121,30 +121,45 @@ export default function SettingsPage() {
   const [clearing, setClearing] = useState(false);
 
   const clearHistory = async () => {
-    if (!window.confirm('Clear ALL chat history? This deletes every saved chat permanently and cannot be undone.')) return;
+    if (!window.confirm('Clear ALL chat history? This deletes every saved chat permanently.')) return;
 
     setClearing(true);
     const token = localStorage.getItem('token');
 
     try {
-      // 1. Get every saved session from localStorage
-      const saved = JSON.parse(localStorage.getItem('chat_sessions') || '[]');
-
-      // 2. Delete each one from the database
-      const deletePromises = saved.map(session =>
-        fetch(`${API_BASE_URL}/delete-session/${session.id}`, {
-          method: 'DELETE',
+      // 1. Fetch ALL sessions from the DB directly (not just localStorage)
+      //    This catches sessions that may have been synced from other devices
+      let sessionIds = [];
+      try {
+        const res = await fetch(`${API_BASE_URL}/get-sessions`, {
           headers: { Authorization: `Bearer ${token}` },
-        }).catch(() => {}) // ignore individual failures
+        });
+        if (res.ok) {
+          const dbSessions = await res.json();
+          sessionIds = dbSessions.map(s => s.id);
+        }
+      } catch {}
+
+      // Also include any IDs only in localStorage (not yet synced)
+      const localSessions = JSON.parse(localStorage.getItem('chat_sessions') || '[]');
+      const localIds = localSessions.map(s => s.id);
+      const allIds = [...new Set([...sessionIds, ...localIds])];
+
+      // 2. Delete every session from DB
+      await Promise.all(
+        allIds.map(id =>
+          fetch(`${API_BASE_URL}/delete-session/${id}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` },
+          }).catch(() => {})
+        )
       );
-      await Promise.all(deletePromises);
 
       // 3. Clear localStorage
       localStorage.removeItem('chat_sessions');
 
-      alert('All chat history deleted successfully.');
+      alert('All chat history deleted successfully!');
     } catch {
-      // Even if API fails, clear localStorage
       localStorage.removeItem('chat_sessions');
       alert('Chat history cleared locally.');
     } finally {

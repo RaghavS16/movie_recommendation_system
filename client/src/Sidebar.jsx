@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { COLORS, FONTS } from './theme';
+import filmoLogo from './assets/filmobot-logo.svg';
 
 export default function Sidebar({ chatSessions, activeSessionId, onSelectSession, onNewChat, onDeleteSession }) {
   const navigate = useNavigate();
@@ -89,12 +90,11 @@ export default function Sidebar({ chatSessions, activeSessionId, onSelectSession
         display: 'flex', alignItems: 'center', gap: '12px',
         padding: '8px 8px 28px', whiteSpace: 'nowrap',
       }}>
-        <div style={{
-          width: '36px', height: '36px', minWidth: '36px', borderRadius: '10px',
-          background: 'linear-gradient(135deg, #f5c842, #c9a227)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: '18px', boxShadow: '0 0 16px rgba(245,200,66,0.3)',
-        }}>🎬</div>
+        <img
+          src={filmoLogo}
+          alt="FilmoBot"
+          style={{ width: '36px', height: '36px', minWidth: '36px', borderRadius: '10px' }}
+        />
         <span style={{
           fontFamily: FONTS.display, fontWeight: '700', fontSize: '18px',
           color: COLORS.textMain,

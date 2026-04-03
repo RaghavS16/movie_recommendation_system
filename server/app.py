@@ -137,6 +137,21 @@ def login():
 
 # ─── CHAT ─────────────────────────────────────────────────────────────────────
 
+# server/chat_route_v2.py
+# Replace the entire @app.route('/chat') function in app.py with this.
+#
+# Top of app.py imports must include:
+#   from tmdb_client import (
+#       search_movie, discover_movies, get_extended_details,
+#       get_watch_providers, get_trailer_key, get_recommendations,
+#       LANGUAGE_MAP, MOOD_GENRE_LABEL
+#   )
+#   from ai_processor import analyze_message, get_persona_response
+#   from movie_search import (
+#       smart_movie_search, did_you_mean,
+#       get_movies_by_actor, get_movies_by_director, find_movie_by_song
+#   )
+
 @app.route('/chat', methods=['POST'])
 @jwt_required()
 def chat():
@@ -182,10 +197,14 @@ def chat():
     mood         = analysis.get("mood")
     language     = analysis.get("language")
     year         = analysis.get("year")
-    # Frontend can override count via settings (movieCount preference)
-    frontend_count = data.get('count')  # sent by ChatPage from user settings
-    ai_count       = analysis.get('count') or 5
-    count          = max(1, min(int(frontend_count or ai_count), 10))
+    # Frontend settings override AI count (user's preferred movie count)
+    try:
+        frontend_count = int(data.get('count') or 0)
+    except (TypeError, ValueError):
+        frontend_count = 0
+    ai_count = int(analysis.get('count') or 5)
+    count    = max(1, min(frontend_count if frontend_count > 0 else ai_count, 10))
+    print(f"COUNT: frontend={frontend_count}, ai={ai_count}, final={count}")
     search_query = (analysis.get("search_query") or "").strip()
     person_query = (analysis.get("person_query") or "").strip()
     song_query   = (analysis.get("song_query")   or "").strip()
@@ -200,12 +219,14 @@ def chat():
     # Actor/Director/Song searches wipe mood context so they don't bleed.
 
     if intent in ("discover", "similar"):
-        if mood or lang_code or year:          # fresh context
+        if wants_more and not (mood or lang_code or year):
+            # Pure "show more" — same context, next page only
+            user.last_page = (user.last_page or 1) + 1
+        elif mood or lang_code or year:
+            # New context — reset everything
             user.last_mood     = mood
             user.last_language = lang_code
             user.last_page     = 1
-        elif wants_more:
-            user.last_page = (user.last_page or 1) + 1
         db.session.commit()
 
     # Read back from DB (reflects the update above)
@@ -218,50 +239,64 @@ def chat():
 
     # ── 3. EXECUTE INTENT ─────────────────────────────────────────────────────
 
-    # ── ACTOR / PERSON ────────────────────────────────────────────────────────
+    # ── ACTOR / PERSON — text reply only, no movie cards ────────────────────
     if intent == "person_search" and person_query:
-        # Try actor first, then director
         movies, real_name = get_movies_by_actor(person_query, limit=count)
         role = "actor"
         if not movies:
             movies, real_name = get_movies_by_director(person_query, limit=count)
             role = "director"
         if movies:
-            results      = movies
-            label        = "top movies featuring" if role == "actor" else "best films by"
-            bot_response = f"🎬 Here are the {label} **{real_name}**, ranked by rating:"
+            label = "Top movies featuring" if role == "actor" else "Best films directed by"
+            lines = [f"🎬 **{label} {real_name}:**\n"]
+            for i, m in enumerate(movies, 1):
+                year  = (m.get('release_date') or '')[:4]
+                year_str = f" ({year})" if year else ""
+                rating = m.get('vote_average', '')
+                rating_str = f" ⭐ {rating:.1f}" if rating else ""
+                lines.append(f"{i}. **{m.get('title','?')}**{year_str}{rating_str}")
             user.last_mood = user.last_language = None
             db.session.commit()
+            return jsonify({"bot_response": "\n".join(lines), "movies": []})
         else:
             return jsonify({
                 "bot_response": (
                     f"Couldn't find **'{person_query}'** in the database.\n"
-                    "Try using their full name, e.g. 'Thalapathy Vijay' or 'S. Shankar'."
+                    "Try their full name, e.g. 'Thalapathy Vijay' or 'S. Shankar'."
                 ),
                 "movies": []
             })
 
-    # ── SONG SEARCH ───────────────────────────────────────────────────────────
+    # ── SONG SEARCH — text reply only, no movie cards ───────────────────────
     elif intent == "song_search" and song_query:
-        results = find_movie_by_song(song_query, limit=max(count, 3))
-        if results:
-            bot_response = (
-                f"🎵 The song **\"{song_query}\"** is likely from one of these films.\n"
-                "Check the trailers to confirm!"
-            )
-        else:
-            # Fallback: treat song name as movie title
-            results = smart_movie_search(song_query, limit=3)
-            bot_response = (
-                f"Searched for song **\"{song_query}\"** — closest matches:"
-                if results else
-                f"Couldn't match **\"{song_query}\"** to a movie. "
-                "Try adding the artist name or a few more lyrics!"
-            )
-        if not results:
-            return jsonify({"bot_response": bot_response, "movies": []})
+        results = find_movie_by_song(song_query, limit=5)
         user.last_mood = user.last_language = None
         db.session.commit()
+        if results:
+            lines = [f"🎵 The song **\"{song_query}\"** is likely from one of these films:\n"]
+            for i, m in enumerate(results, 1):
+                year = (m.get('release_date') or '')[:4]
+                year_str = f" ({year})" if year else ""
+                rating = m.get('vote_average', '')
+                rating_str = f" ⭐ {rating:.1f}" if rating else ""
+                lines.append(f"{i}. **{m.get('title','?')}**{year_str}{rating_str}")
+            lines.append("\nSearch any of these titles for full details!")
+            return jsonify({"bot_response": "\n".join(lines), "movies": []})
+        else:
+            fallback = smart_movie_search(song_query, limit=3)
+            if fallback:
+                lines = [f"🎵 Couldn't find exact match for **\"{song_query}\"**, but these might be it:\n"]
+                for i, m in enumerate(fallback, 1):
+                    year = (m.get('release_date') or '')[:4]
+                    lines.append(f"{i}. **{m.get('title','?')}** ({year})")
+                return jsonify({"bot_response": "\n".join(lines), "movies": []})
+            return jsonify({
+                "bot_response": (
+                    f"Couldn't match **\"{song_query}\"** to a movie.\n"
+                    "Try adding the artist name or more words from the song!"
+                ),
+                "movies": []
+            })
 
     # ── SPECIFIC MOVIE ────────────────────────────────────────────────────────
     elif intent == "search":

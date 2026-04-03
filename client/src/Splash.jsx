@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FONTS } from './theme';
+import filmoLogo from './assets/filmobot-logo.svg';
 
 export default function Splash() {
   const navigate = useNavigate();
@@ -111,16 +112,15 @@ export default function Splash() {
           display: 'flex', flexDirection: 'column', alignItems: 'center',
           animation: 'fadeUp 0.6s ease',
         }}>
-          <div style={{
-            width: '90px', height: '90px', borderRadius: '24px',
-            background: 'linear-gradient(135deg, #f5c842, #c9a227)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: '44px', marginBottom: '24px',
-            boxShadow: '0 0 60px rgba(245,200,66,0.4)',
-            animation: 'pulse-gold 2s ease infinite',
-          }}>
-            🎬
-          </div>
+          <img
+            src={filmoLogo}
+            alt="FilmoBot"
+            style={{
+              width: '120px', height: '120px', marginBottom: '24px',
+              animation: 'pulse-gold 2s ease infinite',
+              filter: 'drop-shadow(0 0 24px rgba(245,200,66,0.5))',
+            }}
+          />
           <h1 style={{
             fontFamily: FONTS.display, fontSize: '56px',
             fontWeight: '900', color: '#f0eee8',
